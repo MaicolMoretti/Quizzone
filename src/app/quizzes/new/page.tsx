@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -13,75 +12,64 @@ import { motion } from "framer-motion";
  * Al salvataggio, crea una riga nel database (stato: bozza) e reindirizza all'editor.
  */
 export default function NewQuizPage() {
-  // Stati del form
+  // Valori controllati del form: React mantiene sempre sincronizzati gli
+  // input visualizzati con lo stato della pagina.
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   
-  // Stati UI
+  // Stato della richiesta e messaggio mostrato all'utente in caso di errore.
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const router = useRouter();
-  const supabase = createClient();
 
   /**
-   * Gestisce l'inserimento del quiz nel database.
+   * Invia il form alla route server che crea il quiz.
+   *
+   * La pagina non scrive più direttamente su Supabase: il server recupera
+   * l'utente dai cookie autenticati e imposta owner_id in modo affidabile.
    */
- const handleCreateQuiz = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  setError(null);
+  const handleCreateQuiz = async (e: React.FormEvent) => {
+    // Impedisce al browser di ricaricare la pagina e perdere lo stato del form.
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
-  try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    try {
+      // La route server esegue autenticazione, validazione e INSERT con RLS.
+      const response = await fetch("/api/quizzes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
 
-    if (userError) {
-      throw new Error(`Sessione non valida: ${userError.message}`);
+      // La route restituisce sempre un JSON con l'ID del quiz o con un campo
+      // error descrittivo, così il frontend può mostrare il problema corretto.
+      const result = await response.json();
+
+      // Qualsiasi risposta HTTP fuori dall'intervallo di successo viene
+      // trasformata in un'eccezione gestita dal blocco catch.
+      if (!response.ok) {
+        throw new Error(result.error || "Impossibile creare il quiz.");
+      }
+
+      // Dopo la creazione l'utente viene portato all'editor del nuovo quiz.
+      router.push(`/quizzes/${result.id}/edit`);
+    } catch (err) {
+      // Mostra il messaggio ricevuto dal server oppure un fallback generico
+      // per errori che non sono istanze di Error.
+      setError(
+        err instanceof Error ? err.message : "Impossibile creare il quiz."
+      );
+    } finally {
+      // Riabilita il pulsante sia dopo un successo sia dopo un errore.
+      setLoading(false);
     }
-
-    if (!user) {
-      throw new Error("Devi effettuare il login prima di creare un quiz.");
-    }
-
-    const quiz = {
-      title: title.trim(),
-      description: description.trim() || null,
-      owner_id: user.id,
-      status: "draft" as const,
-    };
-
-    const { data, error: insertError } = await supabase
-  .from("quizzes")
-  .insert({
-    title: title.trim(),
-    description: description.trim() || null,
-    status: "draft",
-  })
-  .select("id")
-  .single();
-
-    if (insertError) {
-      throw new Error(`Errore database: ${insertError.message}`);
-    }
-
-    router.push(`/quizzes/${data.id}/edit`);
-  } catch (err) {
-    setError(
-      err instanceof Error
-        ? err.message
-        : "Impossibile creare il quiz."
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <div className="min-h-screen p-8 bg-gray-50">
-      {/* Intestazione della pagina con pulsante indietro */}
+      {/* Intestazione: consente di tornare alla dashboard senza inviare il form. */}
       <header className="max-w-3xl mx-auto mb-8 flex items-center gap-4">
         <Link 
           href="/dashboard"
@@ -92,7 +80,7 @@ export default function NewQuizPage() {
         <h1 className="text-3xl font-extrabold text-gray-800">Crea Nuovo Quiz</h1>
       </header>
 
-      {/* Main Container per il modulo */}
+      {/* Contenitore principale del modulo di creazione. */}
       <main className="max-w-3xl mx-auto">
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
@@ -101,7 +89,7 @@ export default function NewQuizPage() {
         >
           <div className="p-8">
             <form onSubmit={handleCreateQuiz} className="space-y-6">
-              {/* Titolo del Quiz (Obbligatorio) */}
+              {/* Titolo obbligatorio del quiz. */}
               <div>
                 <label htmlFor="title" className="block text-sm font-bold text-gray-700 mb-2">
                   Titolo del Quiz
@@ -117,7 +105,7 @@ export default function NewQuizPage() {
                 />
               </div>
 
-              {/* Descrizione (Opzionale) */}
+              {/* Descrizione facoltativa del quiz. */}
               <div>
                 <label htmlFor="description" className="block text-sm font-bold text-gray-700 mb-2">
                   Descrizione (opzionale)
@@ -132,14 +120,14 @@ export default function NewQuizPage() {
                 />
               </div>
 
-              {/* Box di Errore */}
+              {/* Messaggio di errore restituito dalla route server. */}
               {error && (
                 <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
                   {error}
                 </div>
               )}
 
-              {/* Pulsante Invia */}
+              {/* Il pulsante resta disabilitato durante l'invio o senza titolo. */}
               <div className="pt-4 flex justify-end">
                 <button
                   type="submit"

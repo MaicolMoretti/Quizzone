@@ -1,3 +1,8 @@
+/**
+ * Modelli e validazione preventiva dell’editor. Gli UUID rimangono stabili
+ * quando si riordinano le domande, così selezione e riferimenti storici non
+ * dipendono dall’indice. La validazione SQL resta il controllo autoritativo.
+ */
 export interface Answer { id: string; answer_text: string; is_correct: boolean; answer_order?: number; retired?: boolean }
 export interface Question {
   id: string; question_text: string; image_url: string | null; question_order?: number;
@@ -5,11 +10,19 @@ export interface Question {
   answers: Answer[];
 }
 export interface Quiz { id: string; title: string; description: string | null; updated_at: string; status: string }
+/**
+ * Crea una bozza con quattro opzioni vuote, lettura di 5 secondi, risposta
+ * di 15 secondi e 100 punti. Va completata prima del salvataggio.
+ */
 export function newQuestion(): Question {
   return { id: crypto.randomUUID(), question_text: '', image_url: null, preview_seconds: 5, answer_seconds: 15,
     correct_points: 100, wrong_points: 0,
     answers: Array.from({ length: 4 }, () => ({ id: crypto.randomUUID(), answer_text: '', is_correct: false })) };
 }
+/**
+ * Restituisce il primo errore leggibile dall’utente oppure null.
+ * Controlla testi, numero di opzioni, correttezza, intervalli numerici e URL.
+ */
 export function validateQuestions(questions: Question[]): string | null {
   if (!questions.length || questions.length > 200) return 'Inserisci da 1 a 200 domande.';
   for (const [i, q] of questions.entries()) {

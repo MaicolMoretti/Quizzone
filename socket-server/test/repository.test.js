@@ -1,3 +1,8 @@
+/**
+ * Prove del confine Supabase con fetch simulato: validazione del JWT,
+ * controllo del ruolo editor prima di leggere soluzioni e invio dello storico
+ * tramite una sola RPC, priva delle credenziali delle sessioni giocatore.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { SupabaseRepository } = require('../lib/repository');
@@ -5,7 +10,7 @@ const { quiz, fixture } = require('./helpers');
 
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
-test('Supabase validates JWT with Auth; distinguishes rejected credentials from outages', async t => {
+test('Supabase valida il JWT con Auth e distingue credenziali rifiutate da indisponibilità', async t => {
   const repo = new SupabaseRepository('https://example.supabase.co/', 'server-secret');
   const calls = [];
   const fetchMock = t.mock.method(global, 'fetch', async (url, options) => {
@@ -21,7 +26,7 @@ test('Supabase validates JWT with Auth; distinguishes rejected credentials from 
   await assert.rejects(repo.authenticate('token'), e => e.status === 503 && !e.code);
 });
 
-test('quiz lookup checks editor permission before loading answers', async t => {
+test('Il caricamento verifica il permesso editor prima di leggere le soluzioni', async t => {
   const repo = new SupabaseRepository('https://example.supabase.co', 'secret');
   const data = quiz();
   let editor = false;
@@ -41,7 +46,7 @@ test('quiz lookup checks editor permission before loading answers', async t => {
   assert.ok(calls.some(url => url.includes('role=eq.editor')));
 });
 
-test('archive uses one RPC with scores and answer history, without session credentials', async t => {
+test('Archivio con una RPC per punti e risposte, senza credenziali delle sessioni', async t => {
   const f = await fixture();
   const session = await f.engine.join(f.code, 'Anna', 'socket');
   await f.command('end');

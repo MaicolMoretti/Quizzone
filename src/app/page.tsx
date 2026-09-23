@@ -1,4 +1,11 @@
 "use client";
+
+/**
+ * Ingresso pubblico senza account. Il codice resta una stringa di sei cifre
+ * e viene passato alla pagina giocatore, dove il server verifica l’esistenza
+ * della partita e accetta il nickname soltanto durante la lobby.
+ */
+
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';

@@ -1,3 +1,9 @@
+/**
+ * Contratto pubblico del protocollo realtime, coerente con snapshot() nel
+ * motore Node. I campi opzionali dipendono dalla fase: correttezza, statistiche
+ * e classifica non sono disponibili prima della rivelazione della soluzione.
+ * Questi tipi non devono includere quiz privati, hash o identificativi socket.
+ */
 export type Phase = 'LOBBY' | 'QUESTION_PREVIEW' | 'QUESTION_ACTIVE' | 'QUESTION_LOCKED' | 'ANSWER_REVEAL' | 'LEADERBOARD' | 'NEXT_QUESTION' | 'FINAL_RESULTS' | 'ENDED';
 export interface GameState {
   gameId: string; gameCode: string; title: string; status: Phase; revision: number;

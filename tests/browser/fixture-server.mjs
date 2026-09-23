@@ -1,4 +1,9 @@
-// Isolated browser-test services. Never imports production credentials or writes to Supabase.
+/**
+ * Servizi isolati per le prove browser: Auth e REST sono simulati in memoria,
+ * mentre il server Socket.IO è quello dell’applicazione. Le credenziali di prova
+ * non sono valide su Supabase. Non carica i file .env e non scrive nel database reale.
+ */
+// Questi servizi vengono avviati e chiusi da Playwright sulle porte riservate ai test.
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 const require = createRequire(import.meta.url);
@@ -16,6 +21,7 @@ app.use((req, res, next) => {
 });
 const user = { id: randomUUID(), email: 'host@example.test', aud: 'authenticated', role: 'authenticated', email_confirmed_at: new Date().toISOString(), app_metadata: { provider: 'email' }, user_metadata: {}, created_at: new Date().toISOString() };
 const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+// JWT deliberatamente fittizio: la fixture lo riconosce per confronto esatto, senza firma reale.
 const accessToken = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 })}.test-signature`;
 const quizzes = new Map();
 const games = new Map();

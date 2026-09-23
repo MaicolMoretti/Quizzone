@@ -1,3 +1,9 @@
+/**
+ * Regole autoritative della partita: validazione, fasi, timer e punteggi.
+ * Lo stato privato contiene quiz completo, invii e hash delle sessioni; solo
+ * snapshot() può trasformarlo in dati pubblicabili. Store, repository, orologio
+ * e pubblicazione sono iniettati per verificare le regole senza rete reale.
+ */
 const { randomUUID, randomBytes, randomInt, createHash } = require('node:crypto');
 
 class GameError extends Error {
@@ -9,6 +15,10 @@ const uuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[
 const integer = (n, min, max) => Number.isInteger(n) && n >= min && n <= max;
 const visibleResults = new Set(['ANSWER_REVEAL', 'LEADERBOARD', 'NEXT_QUESTION', 'FINAL_RESULTS', 'ENDED']);
 
+/**
+ * Convalida l’intero quiz prima di creare record o pubblicare una lobby. Gli
+ * UUID devono essere unici; ogni domanda richiede almeno un’opzione corretta.
+ */
 function validateQuiz(quiz) {
   if (!quiz || !uuid(quiz.id) || !Array.isArray(quiz.questions) || !quiz.questions.length || quiz.questions.length > 200) {
     fail('INVALID_QUIZ', 'Il quiz deve contenere da 1 a 200 domande.');
@@ -31,13 +41,17 @@ function validateQuiz(quiz) {
   }
 }
 
+/**
+ * Esclude gli espulsi e assegna lo stesso rango a punteggi uguali (1, 1, 3).
+ * Il nickname ordina soltanto la visualizzazione dei giocatori a pari merito.
+ */
 function leaderboard(game) {
   return game.players.filter(p => !p.kicked).map(p => ({ id: p.id, nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname))
     .map((p, i, rows) => ({ ...p, rank: rows.findIndex(r => r.score === p.score) + 1 }));
 }
 
-// This is the only representation that may be broadcast. Never send the stored game.
+// Unica rappresentazione ammessa nei messaggi pubblici: non inviare mai lo stato privato.
 function snapshot(game, now = Date.now()) {
   const q = game.questions[game.currentQuestionIndex];
   const reveal = visibleResults.has(game.status);
@@ -63,7 +77,7 @@ function snapshot(game, now = Date.now()) {
       });
     }
   }
-  // In particular, do not expose updated scores during QUESTION_LOCKED.
+  // Durante QUESTION_LOCKED i nuovi punteggi devono restare nascosti fino alla soluzione.
   if (reveal) state.leaderboard = leaderboard(game);
   if (game.endReason) state.endReason = game.endReason;
   return state;
@@ -76,6 +90,10 @@ class GameEngine {
     this.queues = new Map();
   }
 
+  /**
+   * Ricarica gli stati persistiti, azzera i vecchi socket e recupera subito
+   * le scadenze trascorse: un riavvio non concede tempo aggiuntivo.
+   */
   async restore() {
     for (const game of await this.store.loadAll()) {
       for (const p of game.players) p.socketId = null;
@@ -85,6 +103,10 @@ class GameEngine {
     await this.tick();
   }
 
+  /**
+   * Accoda le operazioni per partita. Una richiesta fallita non blocca quelle
+   * successive; la coda separata "create" serializza l’assegnazione dei codici.
+   */
   serial(key, action) {
     const pending = (this.queues.get(key) || Promise.resolve()).then(action);
     const tail = pending.catch(() => {});
@@ -100,6 +122,10 @@ class GameEngine {
     return game;
   }
 
+  /**
+   * Incrementa la revisione e persiste prima di sostituire lo stato in memoria
+   * e pubblicarlo. Se lo store fallisce, lo stato confermato resta invariato.
+   */
   async save(game) {
     game.revision += 1;
     await this.store.save(game);
@@ -107,6 +133,10 @@ class GameEngine {
     this.publish(game, snapshot(game, this.now()));
   }
 
+  /**
+   * Lavora su una copia privata sotto la coda della partita. Applica prima
+   * scadenza e timer, poi il comando: evita risposte tardive e aggiornamenti persi.
+   */
   mutate(code, action) {
     return this.serial(code, async () => {
       const game = structuredClone(this.get(code));
@@ -115,7 +145,7 @@ class GameEngine {
         await this.save(game);
         fail('GAME_ENDED', 'Partita scaduta.');
       }
-      // Deadlines, not client clocks or interval timing, decide whether an answer is valid.
+      // La scadenza server decide la validità dell’invio, anche se il timer periodico è in ritardo.
       if (this.advanceTimers(game)) await this.save(game);
       const result = await action(game);
       await this.save(game);
@@ -123,6 +153,10 @@ class GameEngine {
     });
   }
 
+  /**
+   * Carica un quiz autorizzato e ne conserva il contenuto nella partita.
+   * Riprova fino a venti codici casuali, rispettando anche l’unicità nel database.
+   */
   async create(userId, quizId) {
     if (!uuid(quizId)) fail('INVALID_QUIZ', 'Identificativo quiz non valido.');
     return this.serial('create', async () => {
@@ -147,10 +181,18 @@ class GameEngine {
     });
   }
 
+  /**
+   * Solo chi ha creato questa partita può condurla, anche se altri utenti
+   * collaborano alla modifica del quiz originale.
+   */
   assertAdmin(game, userId) {
     if (!userId || game.ownerId !== userId) fail('FORBIDDEN', 'Solo il conduttore può controllare questa partita.');
   }
 
+  /**
+   * Normalizza il nickname e controlla duplicati, capienza e fase lobby.
+   * Il token casuale viene restituito una sola volta; nello store resta l’hash.
+   */
   async join(code, nickname, socketId) {
     if (typeof nickname !== 'string') fail('INVALID_NICKNAME', 'Nickname non valido.');
     nickname = nickname.trim().normalize('NFKC');
@@ -166,6 +208,10 @@ class GameEngine {
     });
   }
 
+  /**
+   * Autentica l’identità già creata, sostituisce il socket precedente e
+   * recupera l’invio corrente. Una sessione espulsa non può essere riattivata.
+   */
   reconnect(code, playerId, token, socketId) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) fail('INVALID_SESSION', 'Sessione non valida.');
     return this.mutate(code, game => {
@@ -179,6 +225,10 @@ class GameEngine {
     });
   }
 
+  /**
+   * Aggiorna solo il socket ancora associato: la disconnessione del vecchio
+   * trasporto non deve annullare una riconnessione già completata.
+   */
   disconnect(code, playerId, socketId) {
     return this.mutate(code, game => {
       const p = game.players.find(p => p.id === playerId && p.socketId === socketId);
@@ -186,6 +236,10 @@ class GameEngine {
     });
   }
 
+  /**
+   * Accetta un solo invio per giocatore e domanda attiva. Correttezza, punti
+   * e tempo impiegato sono calcolati sul server, mai accettati dal client.
+   */
   answer(code, playerId, socketId, questionId, answerId) {
     return this.mutate(code, game => {
       const p = game.players.find(p => p.id === playerId && p.socketId === socketId && !p.kicked);
@@ -204,18 +258,29 @@ class GameEngine {
     });
   }
 
+  /**
+   * Seleziona la domanda successiva e programma la fine della lettura
+   * utilizzando un istante assoluto, espresso in millisecondi.
+   */
   preview(game, time) {
     game.currentQuestionIndex += 1;
     game.status = 'QUESTION_PREVIEW';
     game.deadline = time + game.questions[game.currentQuestionIndex].preview_seconds * 1000;
   }
 
+  /**
+   * Apre gli invii e fissa l’istante iniziale da cui misurare il tempo risposta.
+   */
   activate(game, time) {
     game.status = 'QUESTION_ACTIVE';
     game.activeStartedAt = time;
     game.deadline = time + game.questions[game.currentQuestionIndex].answer_seconds * 1000;
   }
 
+  /**
+   * Chiude gli invii e somma i punti una sola volta nella transizione da
+   * QUESTION_ACTIVE. Le chiamate successive ai timer non ripetono il conteggio.
+   */
   lock(game) {
     game.status = 'QUESTION_LOCKED';
     game.deadline = null;
@@ -226,6 +291,10 @@ class GameEngine {
     }
   }
 
+  /**
+   * Recupera in sequenza le transizioni scadute. L’attivazione usa la scadenza
+   * della preview, non l’ora del controllo, così un ritardo non allunga il quiz.
+   */
   advanceTimers(game) {
     let changed = false;
     if (game.status === 'NEXT_QUESTION') { this.preview(game, this.now()); changed = true; }
@@ -238,6 +307,10 @@ class GameEngine {
     return changed;
   }
 
+  /**
+   * Chiude l’eventuale domanda attiva e archivia prima di confermare ENDED.
+   * Un errore di archivio risale al chiamante e lascia possibile un nuovo tentativo.
+   */
   async end(game, reason = 'finished') {
     if (game.status === 'QUESTION_ACTIVE') this.lock(game);
     game.status = 'ENDED';
@@ -245,15 +318,20 @@ class GameEngine {
     game.deadline = null;
     game.endedAt = this.now();
     await this.repository.archive(game);
-    // Keep reconnect/final results available for one hour.
+    // Mantiene riconnessione e risultati finali disponibili per un’ora.
     game.expiresAt = this.now() + 3600000;
   }
 
+  /**
+   * Esegue i comandi del conduttore solo sulla revisione più recente.
+   * Le transizioni manuali seguono la macchina a stati; la chiusura anticipata
+   * usa lo stesso percorso di archiviazione della conclusione normale.
+   */
   command(code, userId, command, revision, playerId) {
     return this.mutate(code, async game => {
       this.assertAdmin(game, userId);
       if (game.status === 'ENDED') fail('GAME_ENDED', 'Partita terminata.');
-      // Repeated clicks or stale admin tabs cannot skip a phase.
+      // Doppi clic e schede del conduttore non aggiornate non possono saltare una fase.
       if (revision !== game.revision) fail('STALE_STATE', 'Stato aggiornato: sincronizza e riprova.');
       if (command === 'kick') {
         const p = game.players.find(p => p.id === playerId && !p.kicked);
@@ -284,6 +362,10 @@ class GameEngine {
     });
   }
 
+  /**
+   * Controllo periodico delle scadenze: serializza per partita, archivia quelle
+   * scadute e rimuove gli stati finali al termine dell’ora di conservazione.
+   */
   async tick() {
     await Promise.all([...this.games.keys()].map(code => this.serial(code, async () => {
       const game = structuredClone(this.get(code));

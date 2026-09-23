@@ -1,6 +1,11 @@
+/**
+ * Prove integrate delle tre viste: creazione e salvataggio del quiz,
+ * ricaricamento dell’editor, ingresso del giocatore, proiettore e archivio finale.
+ * La persistenza è simulata dal processo fixture; i permessi SQL hanno test separati.
+ */
 import { test, expect } from '@playwright/test';
 
-test('create, save, reload, launch and play through final archive across three roles', async ({ page, browser, request }, testInfo) => {
+test('Creazione, salvataggio, ricarica, avvio e partita fino all’archivio nelle tre viste', async ({ page, browser, request }, testInfo) => {
   await page.goto('/login');
   await page.getByLabel('Email').fill('host@example.test');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
@@ -62,7 +67,7 @@ test('create, save, reload, launch and play through final archive across three r
   } finally { await playerContext.close(); await screen.close(); }
 });
 
-test('home accepts a code; invalid game displays a recoverable error', async ({ page }) => {
+test('La homepage accetta il codice; una partita assente mostra un errore recuperabile', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Codice partita').fill('000000');
   await page.getByRole('button', { name: 'Entra in partita' }).click();

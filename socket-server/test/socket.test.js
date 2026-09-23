@@ -1,3 +1,8 @@
+/**
+ * Prove con client Socket.IO reali su porta locale temporanea e repository
+ * simulato. Verificano ruoli, isolamento delle room, ripristino della sessione,
+ * espulsione, archivio e avanzamento automatico dei timer.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { io } = require('socket.io-client');
@@ -8,7 +13,7 @@ const { repository } = require('./helpers');
 
 const emit = (socket, event, payload = {}) => socket.timeout(3000).emitWithAck(event, payload);
 
-test('real Socket.IO clients: roles, room isolation, answers, replacement and final archive', async t => {
+test('Client Socket.IO reali: ruoli, isolamento, invii, sostituzione sessione e archivio', async t => {
   const repo = repository();
   const server = await createGameServer({ store: new MemoryStore(), repository: repo, tickMs: 10000 });
   t.after(() => server.close());
@@ -79,7 +84,7 @@ test('real Socket.IO clients: roles, room isolation, answers, replacement and fi
   assert.equal((await emit(intruder, 'player:join', null)).error.code, 'INVALID_PAYLOAD');
 });
 
-test('automatic timers broadcast server deadlines and lock without admin commands', async t => {
+test('I timer pubblicano le scadenze e chiudono gli invii senza comandi del conduttore', async t => {
   let time = 100000;
   const repo = repository();
   repo.data.questions[0].preview_seconds = 1;

@@ -1,6 +1,7 @@
--- Quizzone: first installation, adapted from schema.sql, game-engine.sql, editor.sql.
--- Run the entire file in the Supabase SQL Editor. Existing application tables cause
--- an error before any changes; this script never drops tables or user data.
+-- Quizzone: prima installazione, derivata da schema.sql, game-engine.sql ed editor.sql.
+-- Eseguire l’intero file nel SQL Editor Supabase solo su un progetto senza tabelle Quizzone.
+-- Se trova tabelle già presenti, interrompe la transazione prima di modificarle.
+-- Non elimina tabelle o dati: crea lo schema e abilita tutte le RLS nella stessa transazione.
 begin;
 set local search_path = public, extensions;
 do $$
@@ -11,11 +12,11 @@ begin
   end if;
 end;
 $$;
--- SOURCE: schema.sql
--- Enable UUID extension
+-- ORIGINE: schema.sql
+-- Abilita l’estensione che genera gli UUID delle righe.
 create extension if not exists "uuid-ossp";
 
--- 1. Quizzes Table
+-- 1. Quiz: metadati, proprietario e stato editoriale.
 create table public.quizzes (
     id uuid primary key default uuid_generate_v4(),
     title text not null,
@@ -28,7 +29,7 @@ create table public.quizzes (
 );
 alter table public.quizzes enable row level security;
 
--- 2. Quiz Collaborators
+-- 2. Collaboratori: editor modifica, viewer può leggere il contenuto del quiz.
 create table public.quiz_collaborators (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -39,7 +40,7 @@ create table public.quiz_collaborators (
 );
 alter table public.quiz_collaborators enable row level security;
 
--- 3. Questions
+-- 3. Domande: ordine, testo, immagine, tempi in secondi e punteggi.
 create table public.questions (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -55,7 +56,7 @@ create table public.questions (
 );
 alter table public.questions enable row level security;
 
--- 4. Answers
+-- 4. Opzioni: ordine e correttezza, mai leggibili direttamente dai giocatori anonimi.
 create table public.answers (
     id uuid primary key default uuid_generate_v4(),
     question_id uuid references questions(id) on delete cascade not null,
@@ -65,7 +66,7 @@ create table public.answers (
 );
 alter table public.answers enable row level security;
 
--- 5. Games (Sessions)
+-- 5. Partite: codice pubblico, conduttore e stato sintetico dello storico.
 create table public.games (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -78,7 +79,7 @@ create table public.games (
 );
 alter table public.games enable row level security;
 
--- 6. Game Players
+-- 6. Giocatori: nickname e punteggio finale della singola partita.
 create table public.game_players (
     id uuid primary key default uuid_generate_v4(),
     game_id uuid references games(id) on delete cascade not null,
@@ -91,7 +92,7 @@ create table public.game_players (
 );
 alter table public.game_players enable row level security;
 
--- 7. Player Answers (History)
+-- 7. Invii storici: risposta scelta, correttezza, punti e tempo impiegato.
 create table public.player_answers (
     id uuid primary key default uuid_generate_v4(),
     game_id uuid references games(id) on delete cascade not null,
@@ -100,14 +101,14 @@ create table public.player_answers (
     answer_id uuid references answers(id) on delete cascade not null,
     is_correct boolean not null,
     points_awarded integer not null,
-    response_time integer not null, -- ms taken to respond
+    response_time integer not null, -- millisecondi trascorsi prima dell’invio
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 alter table public.player_answers enable row level security;
 
--- RLS (Row Level Security) setup
+-- Configurazione RLS: permessi di accesso alle singole righe.
 
--- Quizzes
+-- Policy iniziali per i quiz; editor.sql completa e aggiorna i permessi.
 
 create policy "Users can insert their own quizzes" on quizzes
     for insert with check (auth.uid() = owner_id);
@@ -115,14 +116,14 @@ create policy "Users can insert their own quizzes" on quizzes
 create policy "Users can delete their own quizzes" on quizzes
     for delete using (auth.uid() = owner_id);
 
--- Every application table has RLS enabled immediately after creation.
+-- Ogni tabella applicativa ha RLS abilitata subito dopo la creazione.
 
--- SOURCE: game-engine.sql
--- Run AFTER schema.sql, using the Supabase SQL editor / migration administrator.
--- The Node server alone writes game history, with its server-only service_role key.
+-- ORIGINE: game-engine.sql
+-- Applicare DOPO schema.sql tramite SQL Editor Supabase o utenza amministrativa.
+-- Solo il server Node scrive lo storico tramite la chiave service_role riservata.
 
 
--- Read-only history for the conductor. Players use Socket.IO, not direct DB access.
+-- Il conduttore legge lo storico; i giocatori comunicano via Socket.IO, senza accesso SQL.
 create policy "Conductor reads games" on public.games for select to authenticated
   using (created_by = auth.uid());
 create policy "Conductor reads players" on public.game_players for select to authenticated
@@ -130,6 +131,8 @@ create policy "Conductor reads players" on public.game_players for select to aut
 create policy "Conductor reads answers" on public.player_answers for select to authenticated
   using (exists (select 1 from public.games g where g.id = game_id and g.created_by = auth.uid()));
 
+-- RPC riservata al motore: salva l’esito finale senza duplicare invii nei tentativi ripetuti.
+-- SECURITY INVOKER conserva i privilegi del chiamante; EXECUTE è concesso solo a service_role.
 create function public.archive_game(p_game jsonb)
 returns void
 language plpgsql
@@ -142,7 +145,7 @@ begin
   if p_game->>'status' is null or p_game->>'status' not in ('finished', 'expired') then
     raise exception 'Invalid final game status';
   end if;
-  -- Serialize retries and commit players, answers and final status together.
+  -- Serializza i tentativi con un blocco sulla partita e salva giocatori, invii e stato insieme.
   perform 1 from public.games where id = v_game_id for update;
   if not found then raise exception 'Game not found'; end if;
 
@@ -162,6 +165,7 @@ begin
     id uuid, question_id uuid, player_id uuid, answer_id uuid,
     is_correct boolean, points_awarded integer, response_time integer, created_at timestamptz
   )
+  -- Lo stesso invio, identificato dal suo UUID, non deve essere archiviato due volte.
   on conflict (id) do nothing;
 
   update public.games set status = p_game->>'status',
@@ -173,13 +177,14 @@ $$;
 revoke all on function public.archive_game(jsonb) from public, anon, authenticated;
 grant execute on function public.archive_game(jsonb) to service_role;
 
--- SOURCE: editor.sql
--- Apply after schema.sql and game-engine.sql. Re-runnable migration.
+-- ORIGINE: editor.sql
+-- Applicare dopo schema.sql e game-engine.sql. La migrazione è riapplicabile.
 
 alter table public.questions add column if not exists retired boolean not null default false;
 alter table public.answers add column if not exists retired boolean not null default false;
 
--- Security-definer predicates avoid recursive RLS between quizzes and collaborators.
+-- Le funzioni SECURITY DEFINER evitano ricorsione RLS tra quiz e collaboratori.
+-- Il search_path vuoto e gli schemi espliciti evitano risoluzioni ambigue degli oggetti.
 create function public.quiz_access(p_id uuid, p_edit boolean default false)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists(select 1 from public.quizzes q where q.id = p_id and
@@ -206,11 +211,15 @@ create policy "Quiz readers see questions" on public.questions for select to aut
 create policy "Quiz readers see answers" on public.answers for select to authenticated
   using (exists(select 1 from public.questions q where q.id = question_id and public.quiz_access(q.quiz_id)));
 
--- All editor writes go through one atomic RPC. No direct writes or owner reassignment.
+-- Le modifiche dell’editor passano da un’unica RPC atomica.
+-- Si revocano scritture dirette e riassegnazione del proprietario dal browser.
 revoke insert, update, delete on public.questions, public.answers from anon, authenticated;
 revoke update, delete on public.quizzes from anon, authenticated;
 revoke all on public.quiz_collaborators from anon;
 
+-- Salva l’intero quiz in una transazione: verifica identità, versione e partite aperte.
+-- Qualunque eccezione annulla anche le rimozioni logiche e gli upsert già eseguiti.
+-- Restituisce updated_at, da inviare come versione attesa al salvataggio successivo.
 create function public.save_quiz(p_quiz_id uuid, p_expected_updated_at timestamptz, p_title text, p_description text, p_questions jsonb)
 returns timestamptz language plpgsql security definer set search_path = '' as $$
 declare
@@ -222,6 +231,7 @@ begin
   if auth.uid() is null or not public.quiz_access(p_quiz_id, true) then
     raise exception 'Non hai il permesso di modificare questo quiz.' using errcode = '42501';
   end if;
+  -- Il blocco FOR UPDATE coordina editor concorrenti e inserimenti di nuove partite.
   select updated_at into v_updated from public.quizzes where id = p_quiz_id for update;
   if p_expected_updated_at is distinct from v_updated then
     raise exception 'Il quiz è stato modificato in un’altra sessione. Ricarica prima di salvare.';
@@ -234,7 +244,8 @@ begin
     or jsonb_array_length(p_questions) not between 1 and 200 then
     raise exception 'Inserisci un titolo e da 1 a 200 domande.';
   end if;
-  -- Soft deletion keeps every historical foreign key intact.
+  -- La rimozione logica conserva i riferimenti dello storico: gli elementi inviati
+  -- vengono riattivati durante gli upsert, quelli omessi rimangono retired.
   update public.questions set retired = true where quiz_id = p_quiz_id;
   update public.answers set retired = true where question_id in (select id from public.questions where quiz_id = p_quiz_id);
   for q in select value from jsonb_array_elements(p_questions) loop
@@ -250,6 +261,7 @@ begin
       jsonb_array_length(q->'answers') not between 2 and 8 then
       raise exception 'Domanda % non valida: controlla testo, tempi, punti e risposte.', qi;
     end if;
+    -- Un UUID esistente non può essere spostato da un altro quiz tramite il payload.
     if exists(select 1 from public.questions where id = qid and quiz_id <> p_quiz_id) then
       raise exception 'Identificativo domanda non valido.';
     end if;
@@ -271,6 +283,7 @@ begin
         jsonb_typeof(a->'is_correct') is distinct from 'boolean' then
         raise exception 'Risposta % della domanda % non valida.', ai, qi;
       end if;
+      -- Ogni opzione mantiene la propria domanda, anche in presenza di UUID manipolati.
       if exists(select 1 from public.answers where id = aid and question_id <> qid) then
         raise exception 'Identificativo risposta non valido.';
       end if;
@@ -288,7 +301,8 @@ $$;
 revoke all on function public.save_quiz(uuid, timestamptz, text, text, jsonb) from public;
 grant execute on function public.save_quiz(uuid, timestamptz, text, text, jsonb) to authenticated;
 
--- Serialize game creation against editor saves using the same quiz row lock.
+-- La creazione di una partita e il salvataggio acquisiscono lo stesso blocco
+-- sulla riga quiz: il controllo delle partite aperte avviene in ordine seriale.
 create function public.lock_game_quiz() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin
@@ -302,7 +316,7 @@ create trigger lock_game_quiz before insert on public.games for each row execute
 notify pgrst, 'reload schema';
 commit;
 
--- Expected: seven rows, each with rls_enabled = true.
+-- Risultato atteso: sette righe, tutte con rls_enabled = true.
 select c.relname as tabella, c.relrowsecurity as rls_enabled
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relname in

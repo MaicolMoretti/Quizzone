@@ -1,3 +1,9 @@
+/**
+ * Adattatore HTTP e Socket.IO del motore. Associa ogni connessione a un solo
+ * ruolo e a una sola partita, verifica le credenziali dei comandi amministrativi
+ * e inoltra soltanto gli stati pubblici prodotti dal motore. /health permette
+ * di rilevare la perdita della proprietà esclusiva dello stato Redis.
+ */
 const express = require('express');
 const http = require('node:http');
 const { Server } = require('socket.io');
@@ -7,6 +13,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
   const app = express();
   app.disable('x-powered-by');
   const httpServer = http.createServer(app);
+  // Limita dimensione dei messaggi e origini, sia per polling sia per WebSocket.
   const io = new Server(httpServer, {
     cors: { origin: origins, methods: ['GET', 'POST'] },
     allowRequest: (req, done) => done(null, !req.headers.origin || origins.includes(req.headers.origin)),
@@ -15,11 +22,13 @@ async function createGameServer({ store, repository, origins = ['http://localhos
   let healthy = true;
   let closing = false;
   let ticking = false;
+  // Conserva le operazioni in corso per attenderle durante lo spegnimento.
   const pending = new Set();
   const track = promise => {
     pending.add(promise);
     promise.finally(() => pending.delete(promise));
   };
+  // Le room usano UUID interni: il codice pubblico serve solo a trovare la partita.
   const engine = new GameEngine({ store, repository, now, publish: (game, state) => {
     io.to(game.id).emit('game:state_update', state);
     if (['LEADERBOARD', 'FINAL_RESULTS', 'ENDED'].includes(game.status)) {
@@ -31,7 +40,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
 
   await store.connect(() => {
     healthy = false;
-    // Stop serving before another instance may acquire the lease.
+    // Interrompe le connessioni prima che un altro processo acquisisca la lease.
     io.disconnectSockets(true);
     logger.error('Lease Redis persa: riavviare il Game Engine.');
   });
@@ -41,6 +50,8 @@ async function createGameServer({ store, repository, origins = ['http://localhos
     let queue = Promise.resolve();
     let windowStart = now();
     let requests = 0;
+    // Wrapper comune: limite di 30 eventi/secondo, coda per socket, payload e ack.
+    // La coda impedisce che join e comandi dello stesso client si superino a vicenda.
     const event = (name, action) => socket.on(name, (payload, ack) => {
       const reply = value => { if (typeof ack === 'function') ack(value); else if (!value.ok) socket.emit('game:error', value.error); };
       if (now() - windowStart >= 1000) { windowStart = now(); requests = 0; }
@@ -62,7 +73,9 @@ async function createGameServer({ store, repository, origins = ['http://localhos
     const unused = () => {
       if (socket.data.role) throw new GameError('ALREADY_JOINED', 'Questo socket è già associato a una partita.');
     };
+    // Ogni comando amministrativo ricontrolla il token su Supabase Auth.
     const user = () => repository.authenticate(socket.handshake.auth?.accessToken);
+    // Fissa ruolo e partita sul socket; i payload successivi non possono cambiarli.
     const bind = async (code, role, playerId) => {
       const game = engine.get(code);
       socket.data = { code, role, playerId };
@@ -104,6 +117,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
       const session = await engine.join(gameCode, nickname, socket.id);
       return { ...session, state: await bind(gameCode, 'player', session.playerId) };
     });
+    // Il ripristino invalida il vecchio trasporto, conservando identità e risposta.
     event('player:reconnect', async ({ gameCode, playerId, sessionToken }) => {
       unused();
       const { previousSocketId, answerId } = await engine.reconnect(gameCode, playerId, sessionToken, socket.id);
@@ -118,6 +132,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
       const code = requireRole('player');
       return engine.answer(code, socket.data.playerId, socket.id, questionId, answerId);
     });
+    // Lo stato è pubblico; answerId è aggiunto soltanto per il giocatore richiedente.
     event('game:sync', async () => {
       if (!socket.data.role) throw new GameError('FORBIDDEN', 'Entra prima nella partita.');
       const game = engine.get(socket.data.code);
@@ -146,6 +161,8 @@ async function createGameServer({ store, repository, origins = ['http://localhos
     });
   });
 
+  // Controlla le scadenze ogni 250 ms ma invia il conto alla rovescia solo quando
+  // cambia il secondo visualizzato. ticking evita sovrapposizioni tra controlli.
   const lastTicks = new Map();
   const timer = setInterval(async () => {
     if (ticking || !healthy || closing) return;
@@ -181,7 +198,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
       clearInterval(timer);
       await new Promise(resolve => io.close(resolve));
       await Promise.all([...pending]);
-      // Finish already queued mutations before releasing Redis ownership.
+      // Completa le mutazioni accodate prima di rilasciare la proprietà su Redis.
       await Promise.all([...engine.queues.values()]);
       await store.close();
     },

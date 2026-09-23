@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
+/* Outfit diventa il font predefinito; i font di sistema sono il ripiego. */
 @theme {
   --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Stili comuni di campi e pulsanti, per uniformare moduli ed editor. */
 @layer components {
   .field { @apply mt-2 w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200; }
   .action { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-bold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50; }
 }
+/* Evidenzia gli elementi interattivi e il focus della navigazione da tastiera. */
 button:not(:disabled), a { cursor: pointer; }
 button:focus-visible, a:focus-visible { outline: 3px solid #a855f7; outline-offset: 3px; }

@@ -1,11 +1,20 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- Dynamic quiz images are user-supplied URLs. */
+
+/**
+ * Schermata condivisa da giocatore, conduttore e proiettore. Il ruolo decide
+ * quali controlli mostrare; l’autorizzazione effettiva è sempre sul server.
+ * Le fasi ricevute tramite useGame selezionano lobby, domanda, soluzione e podio.
+ * Il componente si occupa della presentazione, senza conoscere soluzioni future.
+ */
+
+/* eslint-disable @next/next/no-img-element -- Le immagini dei quiz provengono da URL inseriti dagli utenti. */
 import { useState } from 'react';
 import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
 import { useGame } from '@/lib/game/use-game';
 import type { GameRole, Phase } from '@/lib/game/types';
 
+// Etichette di visualizzazione: i valori Phase restano gli identificativi del protocollo.
 const labels: Record<Phase, string> = { LOBBY: 'Aspettiamo i giocatori', QUESTION_PREVIEW: 'Leggi la domanda', QUESTION_ACTIVE: 'Scegli la tua risposta', QUESTION_LOCKED: 'Tempo scaduto · risposte chiuse', ANSWER_REVEAL: 'La risposta corretta', LEADERBOARD: 'Classifica', NEXT_QUESTION: 'Preparati alla prossima domanda', FINAL_RESULTS: 'Il podio finale', ENDED: 'Partita conclusa' };
 const nextLabels: Partial<Record<Phase, string>> = { QUESTION_PREVIEW: 'Mostra le risposte', QUESTION_ACTIVE: 'Chiudi le risposte', QUESTION_LOCKED: 'Rivela la soluzione', ANSWER_REVEAL: 'Mostra la classifica', LEADERBOARD: 'Prosegui', FINAL_RESULTS: 'Concludi e archivia' };
 const colors = ['bg-rose-600', 'bg-blue-600', 'bg-amber-600', 'bg-emerald-600'];
@@ -22,6 +31,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
   const revealed = state?.question?.answers?.some(a => typeof a.is_correct === 'boolean');
   const selected = state?.question?.answers?.find(a => a.id === game.selectedAnswer);
   const ownRank = state?.leaderboard?.find(p => p.id === game.playerId);
+  // In rete locale l’URL configurato evita QR con localhost, irraggiungibile dal telefono.
   const playUrl = state && typeof window !== 'undefined' ? `${(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '')}/play/${state.gameCode}` : '';
 
   return <main className={`min-h-dvh bg-slate-950 text-white ${role === 'presentation' ? 'p-8 lg:p-12' : 'p-4 sm:p-8'}`}>
@@ -32,6 +42,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
         {state && <span className="rounded-full bg-white/10 px-4 py-2">Codice <strong className="tracking-widest">{state.gameCode}</strong></span>}
       </header>
       {game.error && <div role="alert" className="mb-6 rounded-xl border border-rose-400/40 bg-rose-950 p-4"><p>{game.error}</p><button onClick={game.reconnect} className="mt-2 underline">Riconnetti</button></div>}
+      {/* L’invio da tastiera e il tocco usano lo stesso form; il blur chiude la tastiera mobile. */}
       {isPlayer && !joined && !state && <form className="mx-auto max-w-md space-y-5 rounded-3xl bg-white p-8 text-slate-900" onSubmit={e => { e.preventDefault(); if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur(); void game.join(nickname); }}>
         <h1 className="text-3xl font-bold">Entra in partita</h1><p>Codice {identifier}</p>
         <label className="block">Come ti chiami?<input className="field" name="nickname" autoComplete="nickname" autoCapitalize="none" spellCheck={false} enterKeyHint="go" maxLength={32} required value={nickname} onChange={e => setNickname(e.target.value)} /></label>
@@ -44,6 +55,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
           <div className="min-w-0"><p className="mb-2 break-words text-purple-300">{state.title}{state.currentQuestionIndex >= 0 && ` · ${state.currentQuestionIndex + 1}/${state.totalQuestions}`}</p><h1 className="text-3xl font-black sm:text-5xl">{labels[state.status]}</h1></div>
           {state.deadline && <div role="timer" aria-label={`${state.timer} secondi rimanenti`} className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-4 border-purple-400 text-3xl font-black tabular-nums">{state.timer}</div>}
         </div>
+        {/* In lobby il QR è riservato a conduttore/proiettore; il giocatore vede la conferma. */}
         {state.status === 'LOBBY' && <div className="grid gap-8 md:grid-cols-[1fr_300px]">
           <section className="rounded-3xl bg-white/5 p-6"><h2 className="mb-5 text-2xl font-bold">{state.playersCount} partecipanti</h2>
             <div className="flex flex-wrap gap-3">{state.players.map(p => <span key={p.id} className="max-w-full break-words rounded-xl bg-white/10 px-4 py-3">{p.nickname}{!p.connected && ' · offline'}</span>)}</div>
@@ -52,6 +64,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
           </section>
           {!isPlayer && <aside className="rounded-3xl bg-white p-6 text-center text-slate-900"><QRCodeSVG value={playUrl} size={220} marginSize={4} level="M" className="mx-auto h-auto max-w-full" title="Scansiona per entrare nella partita" /><p className="my-4 text-3xl font-black tracking-widest">{state.gameCode}</p><button className="text-purple-700 underline" onClick={async () => { try { await navigator.clipboard.writeText(playUrl); setCopied(true); } catch { setCopied(false); } }}>{copied ? 'Link copiato' : 'Copia link di invito'}</button><a href={playUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-xs">{playUrl}</a></aside>}
         </div>}
+        {/* Le opzioni e la correttezza arrivano dal server solo nelle fasi consentite. */}
         {state.question && !ranking && state.status !== 'NEXT_QUESTION' && <section className="space-y-6">
           <h2 className="break-words text-center text-2xl font-bold sm:text-4xl">{state.question.question_text}</h2>
           {state.question.image_url && /^https?:\/\//i.test(state.question.image_url) && <img src={state.question.image_url} alt="Immagine della domanda" className="mx-auto max-h-72 rounded-2xl object-contain" />}
@@ -65,15 +78,18 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
           <p role="status" className="text-center text-purple-200">{isPlayer ? revealed ? selected ? selected.is_correct ? 'Risposta corretta!' : 'Risposta errata.' : 'Non hai risposto a questa domanda.' : game.selectedAnswer ? 'Risposta inviata. Attendi la soluzione.' : state.status === 'QUESTION_PREVIEW' ? 'Le opzioni appariranno tra poco.' : state.status === 'QUESTION_LOCKED' ? 'Attendi la soluzione.' : 'Puoi scegliere una sola risposta.' : `${state.totalAnswers} risposte ricevute su ${state.playersCount} partecipanti`}</p>
           {isPlayer && revealed && ownRank && <p className="text-center text-xl font-bold">Il tuo punteggio: {ownRank.score} · Posizione {ownRank.rank}</p>}
         </section>}
+        {/* Il testo può andare a capo anche per nickname lunghi su schermi stretti. */}
         {ranking && <section className="mx-auto max-w-3xl space-y-3">
           {isFinal && state.leaderboard?.[0] && <p className="mb-8 break-words text-center text-3xl [overflow-wrap:anywhere]">🏆 {state.leaderboard.filter(p => p.rank === 1).map(p => p.nickname).join(' e ')}</p>}
           {state.leaderboard?.map(p => <div key={p.id} className={`flex items-center gap-5 rounded-2xl p-5 ${p.id === game.playerId ? 'bg-purple-600' : 'bg-white/10'}`}><span className="text-2xl font-black">{p.rank}</span><span className="min-w-0 flex-1 break-words text-xl">{p.nickname}</span><strong className="text-xl">{p.score} punti</strong></div>)}
           {!state.leaderboard?.length && <p>Nessun giocatore in classifica.</p>}
           {state.status === 'ENDED' && <p className="pt-5 text-center text-purple-200">{state.endReason === 'expired' ? 'La partita è scaduta.' : 'Grazie per aver giocato!'} <Link className="underline" href={isAdmin ? '/dashboard' : '/'}>Torna {isAdmin ? 'alla dashboard' : 'alla home'}</Link></p>}
         </section>}
+        {/* I comandi portano la revisione corrente; il server verifica nuovamente ruolo e identità. */}
         {isAdmin && <section className="mt-10 space-y-5 rounded-2xl border border-white/20 p-5">
           <div className="flex flex-wrap gap-4">
-            {state.status === 'LOBBY' && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:start_game')}>Inizia il quiz</button>}
+            {/* In lobby il QR è riservato a conduttore/proiettore; il giocatore vede la conferma. */}
+        {state.status === 'LOBBY' && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:start_game')}>Inizia il quiz</button>}
             {nextLabels[state.status] && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:next_state')}>{nextLabels[state.status]}</button>}
             <Link className="rounded-xl bg-white/10 px-5 py-3" target="_blank" href={`/game/${state.gameId}/presentation`}>Apri proiettore ↗</Link>
             {state.status !== 'ENDED' && <button disabled={!connected || !joined || busy} className="px-5 py-3 text-rose-300 disabled:opacity-40" onClick={() => { if (window.confirm('Concludere ora la partita e archiviare i risultati?')) void game.command('admin:end_game'); }}>Termina partita</button>}

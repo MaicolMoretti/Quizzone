@@ -1,8 +1,14 @@
+/**
+ * Prove touch con profili iPhone e Pixel, eseguite nel browser configurato
+ * in Playwright. Verificano QR renderizzato, codice, nickname e partita completa.
+ * L’emulazione non riproduce fotocamera reale, tastiera nativa o Safari su iPhone.
+ */
 import { test, expect, devices, type APIRequestContext, type Page, type BrowserContext } from '@playwright/test';
 import { io, type Socket } from 'socket.io-client';
 import { randomUUID } from 'node:crypto';
 import jsQR from 'jsqr';
 
+// Prepara un quiz con due domande e mantiene un socket conduttore per guidare la prova.
 async function lobby(request: APIRequestContext) {
   const auth = await (await request.post('http://127.0.0.1:54325/auth/v1/token', { data: {} })).json();
   const quiz = await (await request.post('http://127.0.0.1:54325/rest/v1/quizzes', { data: { title: 'Quiz mobile', owner_id: auth.user.id, status: 'draft' } })).json();
@@ -17,15 +23,18 @@ async function lobby(request: APIRequestContext) {
   expect(result.ok).toBe(true);
   return { socket, ...result.data.state } as { socket: Socket; gameId: string; gameCode: string };
 }
+// Sincronizza la revisione prima del comando, come richiesto dal protocollo del motore.
 async function command(socket: Socket, event: string, playerId?: string) {
   const synced = await socket.timeout(5000).emitWithAck('game:sync', {});
   const result = await socket.timeout(5000).emitWithAck(event, { revision: synced.data.state.revision, playerId });
   expect(result.ok, JSON.stringify(result)).toBe(true);
   return result.data.state;
 }
+// Rileva contenuti più larghi della viewport, inclusi nickname lunghi nelle classifiche.
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
+// Verifica che i principali pulsanti siano attivi e abbiano un’area di almeno 44×44 pixel.
 async function touchTarget(page: Page, name: string) {
   const button = page.getByRole('button', { name, exact: true });
   await expect(button).toBeEnabled();
@@ -34,6 +43,7 @@ async function touchTarget(page: Page, name: string) {
   expect(bounds!.width).toBeGreaterThanOrEqual(44);
   return button;
 }
+// Rasterizza il vero SVG tramite screenshot e canvas; jsQR ne legge i pixel risultanti.
 async function decodeQR(page: Page) {
   const png = await page.locator('aside svg').screenshot();
   const raster = await page.evaluate(async base64 => {
@@ -47,6 +57,7 @@ async function decodeQR(page: Page) {
   expect(decoded, 'The rendered QR must be decodable').not.toBeNull();
   return decoded!.data;
 }
+// Esegue l’accesso dalla UI con l’account simulato prima dei comandi del conduttore.
 async function signedIn(context: BrowserContext) {
   const page = await context.newPage();
   await page.goto('/login');
@@ -58,7 +69,7 @@ async function signedIn(context: BrowserContext) {
 }
 
 for (const [device, entry] of [['iPhone 13', 'qr'], ['Pixel 7', 'code'], ['iPhone SE', 'code']] as const) {
-  test(`${device}: ${entry} entry, nickname tap, answers, refresh, offline recovery and final scores`, async ({ browser, request }, testInfo) => {
+  test(`${device}: ingresso ${entry}, nickname con tocco, risposte, ricarica, riconnessione e punteggi`, async ({ browser, request }, testInfo) => {
     const game = await lobby(request);
     const emulation = devices[device];
     const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...emulation });
@@ -68,7 +79,7 @@ for (const [device, entry] of [['iPhone 13', 'qr'], ['Pixel 7', 'code'], ['iPhon
     try {
       await screen.goto(`/game/${game.gameId}/presentation`);
       await expect(screen.getByRole('heading', { name: 'Aspettiamo i giocatori' })).toBeVisible();
-      // Decode pixels, not just the anchor: the QR must match the visible code and public origin.
+      // Decodifica i pixel del QR per verificare anche la leggibilità, il codice e l’origine pubblica.
       const invite = await decodeQR(screen);
       expect(invite).toBe(`http://localhost:3100/play/${game.gameCode}`);
       await expect(screen.locator('aside a')).toHaveAttribute('href', invite);
@@ -106,7 +117,7 @@ for (const [device, entry] of [['iPhone 13', 'qr'], ['Pixel 7', 'code'], ['iPhon
       await page.reload();
       await expect(page.getByText('Risposta inviata. Attendi la soluzione.')).toBeVisible();
       await context.setOffline(true);
-      // Explicitly sever the transport so recovery does not depend on ping timeout.
+      // Interrompe esplicitamente il trasporto per verificare il recupero senza attendere il timeout del ping.
       await page.evaluate(() => window.dispatchEvent(new Event('offline')));
       await expect(page.getByRole('status').filter({ hasText: 'Connessione in corso' })).toBeVisible();
       await context.setOffline(false);
@@ -139,7 +150,7 @@ for (const [device, entry] of [['iPhone 13', 'qr'], ['Pixel 7', 'code'], ['iPhon
   });
 }
 
-test('touch: duplicate nickname can be corrected; keyboard submit and double tap create one player', async ({ browser, request }) => {
+test('Touch: nickname duplicato correggibile; Invio e doppio tocco creano un solo giocatore', async ({ browser, request }) => {
   const game = await lobby(request);
   const contexts = await Promise.all([browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['Pixel 7'] }), browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['Pixel 7'] })]);
   try {
@@ -161,7 +172,7 @@ test('touch: duplicate nickname can be corrected; keyboard submit and double tap
   } finally { game.socket.disconnect(); await Promise.all(contexts.map(c => c.close())); }
 });
 
-test('mobile conductor: touch controls, QR, resume after refresh and participant removal', async ({ browser, request }) => {
+test('Conduttore mobile: controlli touch, QR, ripresa dopo ricarica e rimozione partecipanti', async ({ browser, request }) => {
   const game = await lobby(request);
   const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['Pixel 7'] });
   const playerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['iPhone SE'] });
@@ -188,7 +199,7 @@ test('mobile conductor: touch controls, QR, resume after refresh and participant
   } finally { game.socket.disconnect(); await context.close(); await playerContext.close(); }
 });
 
-test('mobile nickname remains usable when browser storage is unavailable', async ({ browser, request }) => {
+test('Il nickname mobile funziona anche quando lo storage del browser è bloccato', async ({ browser, request }) => {
   const game = await lobby(request);
   const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['iPhone 13'] });
   await context.addInitScript(() => {
@@ -203,7 +214,7 @@ test('mobile nickname remains usable when browser storage is unavailable', async
   } finally { game.socket.disconnect(); await context.close(); }
 });
 
-test('mobile: nickname submit waits for server connection then enables without reloading', async ({ browser, request }) => {
+test('Mobile: invio nickname abilitato dopo la connessione, senza ricaricare', async ({ browser, request }) => {
   const game = await lobby(request);
   const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['Pixel 7'] });
   await context.route('**/socket.io/**', route => route.abort());
@@ -219,7 +230,7 @@ test('mobile: nickname submit waits for server connection then enables without r
   } finally { game.socket.disconnect(); await context.close(); }
 });
 
-test('small mobile and landscape: code and nickname submit remain reachable with reduced height', async ({ browser, request }, testInfo) => {
+test('Schermo piccolo e orizzontale: invio codice e nickname accessibili con altezza ridotta', async ({ browser, request }, testInfo) => {
   const game = await lobby(request);
   const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3100', ...devices['iPhone SE'], viewport: { width: 320, height: 568 } });
   try {

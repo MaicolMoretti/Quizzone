@@ -1,3 +1,8 @@
+/**
+ * Struttura comune delle pagine: lingua italiana, metadati e font Outfit.
+ * next/font gestisce il caricamento del font; la variabile CSS viene riutilizzata
+ * dal tema Tailwind definito in globals.css.
+ */
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
@@ -8,8 +13,8 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Quizzone - Live Interactive Quizzes",
-  description: "Create and play interactive multiplayer quizzes in real-time.",
+  title: "Quizzone - Quiz interattivi in tempo reale",
+  description: "Crea quiz multiplayer e gioca in tempo reale con codice partita o QR.",
 };
 
 export default function RootLayout({

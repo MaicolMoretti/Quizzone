@@ -1,4 +1,11 @@
 "use client";
+
+/**
+ * Area degli organizzatori: carica i quiz visibili tramite RLS e le partite
+ * aperte create dall’utente. Avviare genera una nuova sessione nel motore;
+ * riprendere riapre invece la vista del conduttore per la sessione esistente.
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -23,6 +30,7 @@ export default function DashboardPage() {
       try {
         const { data: auth, error: authError } = await supabase.auth.getUser();
         if (authError || !auth.user) { router.replace('/login'); return; }
+        // Richieste indipendenti: RLS filtra i quiz; le partite sono del conduttore corrente.
         const [quizResult, gameResult] = await Promise.all([
           supabase.from('quizzes').select('*').order('updated_at', { ascending: false }),
           supabase.from('games').select('id,quiz_id,game_code,status,created_at').eq('created_by', auth.user.id).in('status', ['waiting', 'active']).order('created_at', { ascending: false }),
@@ -34,6 +42,7 @@ export default function DashboardPage() {
     }
     void load(); return () => { disposed = true; };
   }, [supabase, router]);
+  // Il riferimento blocca immediatamente avvii duplicati, prima del prossimo render.
   async function start(quizId: string) {
     if (launchingRef.current) return;
     launchingRef.current = true; setLaunching(quizId); setError('');

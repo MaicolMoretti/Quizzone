@@ -1,10 +1,15 @@
+/**
+ * Prove della macchina a stati senza rete: punteggi, parità, scadenze,
+ * autorizzazioni, invii duplicati, riconnessione e fallimenti della persistenza.
+ * Le verifiche sugli snapshot controllano che le informazioni private non escano.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { GameEngine, snapshot } = require('../lib/engine');
 const { fixture, quiz } = require('./helpers');
 const rejects = (promise, code) => assert.rejects(promise, e => e.code === code);
 
-test('complete two-question FSM: scoring, percentages, ties and archive', async () => {
+test('Partita completa con due domande: punteggi, percentuali, parità e archivio', async () => {
   const f = await fixture();
   const a = await f.engine.join(f.code, 'Anna', 's1');
   const b = await f.engine.join(f.code, 'Bruno', 's2');
@@ -41,7 +46,7 @@ test('complete two-question FSM: scoring, percentages, ties and archive', async 
   assert.equal(f.repo.started.length, 1);
 });
 
-test('unknown rooms, invalid nicknames, duplicate names and late joins are rejected', async () => {
+test('Rifiuta partite assenti, nickname non validi o duplicati e ingressi tardivi', async () => {
   const f = await fixture();
   await rejects(f.engine.join('000000', 'A', 's'), 'GAME_NOT_FOUND');
   await rejects(f.engine.join(f.code, '\n', 's'), 'INVALID_NICKNAME');
@@ -51,7 +56,7 @@ test('unknown rooms, invalid nicknames, duplicate names and late joins are rejec
   await rejects(f.engine.join(f.code, 'B', 's2'), 'GAME_STARTED');
 });
 
-test('duplicate and stale answers cannot change scores; deadlines close answers without a tick', async () => {
+test('Invii duplicati e obsoleti non alterano i punti; le scadenze valgono anche senza tick', async () => {
   const f = await fixture();
   const p = await f.engine.join(f.code, 'A', 's');
   const q = f.engine.get(f.code).questions[0];
@@ -72,7 +77,7 @@ test('duplicate and stale answers cannot change scores; deadlines close answers 
   assert.equal(f.engine.get(f.code).players[0].score, 100);
 });
 
-test('admin authorization and revision prevent impersonation and repeated transitions', async () => {
+test('Autorizzazione e revisione impediscono impersonificazione e transizioni ripetute', async () => {
   const f = await fixture();
   await rejects(f.engine.command(f.code, 'intruder', 'start', 1), 'FORBIDDEN');
   await rejects(f.command(), 'INVALID_STATE');
@@ -82,7 +87,7 @@ test('admin authorization and revision prevent impersonation and repeated transi
   await rejects(f.command('start'), 'INVALID_STATE');
 });
 
-test('reconnect authenticates the player, replaces socket, preserves answer and rejects kicked sessions', async () => {
+test('Riconnessione: autentica, sostituisce il socket, conserva la risposta e rifiuta gli espulsi', async () => {
   const f = await fixture();
   const p = await f.engine.join(f.code, 'A', 's');
   const q = f.engine.get(f.code).questions[0];
@@ -99,7 +104,7 @@ test('reconnect authenticates the player, replaces socket, preserves answer and 
   assert.equal(snapshot(f.engine.get(f.code)).playersCount, 0);
 });
 
-test('restart catches up expired preview/answer deadlines and scores exactly once', async () => {
+test('Il riavvio recupera le scadenze e conteggia i punti una sola volta', async () => {
   const f = await fixture();
   const p = await f.engine.join(f.code, 'A', 's');
   await f.command('start'); await f.command();
@@ -116,7 +121,7 @@ test('restart catches up expired preview/answer deadlines and scores exactly onc
   await restored.reconnect(f.code, p.playerId, p.sessionToken, 'new');
 });
 
-test('zero preview, no answers, early end and expiry are supported', async () => {
+test('Gestisce lettura nulla, nessun invio, chiusura anticipata e scadenza', async () => {
   const f = await fixture(1);
   f.engine.get(f.code).questions[0].preview_seconds = 0;
   await f.command('start'); await f.engine.tick();
@@ -132,7 +137,7 @@ test('zero preview, no answers, early end and expiry are supported', async () =>
   assert.equal(other.repo.archived[0].endReason, 'expired');
 });
 
-test('failed archive or Redis write is retryable and does not mutate committed state', async () => {
+test('Errori di archivio o Redis consentono un nuovo tentativo senza alterare lo stato confermato', async () => {
   const f = await fixture();
   const save = f.store.save.bind(f.store);
   f.store.save = async () => { throw new Error('Redis down'); };
@@ -149,7 +154,7 @@ test('failed archive or Redis write is retryable and does not mutate committed s
   assert.equal(f.engine.get(f.code).status, 'ENDED');
 });
 
-test('invalid quiz is rejected before game creation and snapshots never contain session secrets', async () => {
+test('Rifiuta quiz non validi prima della creazione e non pubblica segreti delle sessioni', async () => {
   const f = await fixture();
   const p = await f.engine.join(f.code, 'A', 's');
   const data = JSON.stringify(snapshot(f.engine.get(f.code)));

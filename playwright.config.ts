@@ -1,3 +1,9 @@
+/**
+ * Test browser isolati dal progetto Supabase reale. Il processo di supporto
+ * fornisce Auth/REST simulati e il vero motore Socket.IO in memoria. Next.js
+ * usa porte e cache dedicate; un solo worker mantiene deterministico lo storico
+ * condiviso delle prove. PLAYWRIGHT_CHANNEL=chrome usa Chrome già installato.
+ */
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/browser', fullyParallel: false, workers: 1, timeout: 60000,

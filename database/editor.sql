@@ -1,9 +1,10 @@
--- Apply after schema.sql and game-engine.sql. Re-runnable migration.
+-- Applicare dopo schema.sql e game-engine.sql. La migrazione è riapplicabile.
 begin;
 alter table public.questions add column if not exists retired boolean not null default false;
 alter table public.answers add column if not exists retired boolean not null default false;
 
--- Security-definer predicates avoid recursive RLS between quizzes and collaborators.
+-- Le funzioni SECURITY DEFINER evitano ricorsione RLS tra quiz e collaboratori.
+-- Il search_path vuoto e gli schemi espliciti evitano risoluzioni ambigue degli oggetti.
 create or replace function public.quiz_access(p_id uuid, p_edit boolean default false)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists(select 1 from public.quizzes q where q.id = p_id and
@@ -39,11 +40,15 @@ drop policy if exists "Quiz readers see answers" on public.answers;
 create policy "Quiz readers see answers" on public.answers for select to authenticated
   using (exists(select 1 from public.questions q where q.id = question_id and public.quiz_access(q.quiz_id)));
 
--- All editor writes go through one atomic RPC. No direct writes or owner reassignment.
+-- Le modifiche dell’editor passano da un’unica RPC atomica.
+-- Si revocano scritture dirette e riassegnazione del proprietario dal browser.
 revoke insert, update, delete on public.questions, public.answers from anon, authenticated;
 revoke update, delete on public.quizzes from anon, authenticated;
 revoke all on public.quiz_collaborators from anon;
 
+-- Salva l’intero quiz in una transazione: verifica identità, versione e partite aperte.
+-- Qualunque eccezione annulla anche le rimozioni logiche e gli upsert già eseguiti.
+-- Restituisce updated_at, da inviare come versione attesa al salvataggio successivo.
 create or replace function public.save_quiz(p_quiz_id uuid, p_expected_updated_at timestamptz, p_title text, p_description text, p_questions jsonb)
 returns timestamptz language plpgsql security definer set search_path = '' as $$
 declare
@@ -55,6 +60,7 @@ begin
   if auth.uid() is null or not public.quiz_access(p_quiz_id, true) then
     raise exception 'Non hai il permesso di modificare questo quiz.' using errcode = '42501';
   end if;
+  -- Il blocco FOR UPDATE coordina editor concorrenti e inserimenti di nuove partite.
   select updated_at into v_updated from public.quizzes where id = p_quiz_id for update;
   if p_expected_updated_at is distinct from v_updated then
     raise exception 'Il quiz è stato modificato in un’altra sessione. Ricarica prima di salvare.';
@@ -67,7 +73,8 @@ begin
     or jsonb_array_length(p_questions) not between 1 and 200 then
     raise exception 'Inserisci un titolo e da 1 a 200 domande.';
   end if;
-  -- Soft deletion keeps every historical foreign key intact.
+  -- La rimozione logica conserva i riferimenti dello storico: gli elementi inviati
+  -- vengono riattivati durante gli upsert, quelli omessi rimangono retired.
   update public.questions set retired = true where quiz_id = p_quiz_id;
   update public.answers set retired = true where question_id in (select id from public.questions where quiz_id = p_quiz_id);
   for q in select value from jsonb_array_elements(p_questions) loop
@@ -83,6 +90,7 @@ begin
       jsonb_array_length(q->'answers') not between 2 and 8 then
       raise exception 'Domanda % non valida: controlla testo, tempi, punti e risposte.', qi;
     end if;
+    -- Un UUID esistente non può essere spostato da un altro quiz tramite il payload.
     if exists(select 1 from public.questions where id = qid and quiz_id <> p_quiz_id) then
       raise exception 'Identificativo domanda non valido.';
     end if;
@@ -104,6 +112,7 @@ begin
         jsonb_typeof(a->'is_correct') is distinct from 'boolean' then
         raise exception 'Risposta % della domanda % non valida.', ai, qi;
       end if;
+      -- Ogni opzione mantiene la propria domanda, anche in presenza di UUID manipolati.
       if exists(select 1 from public.answers where id = aid and question_id <> qid) then
         raise exception 'Identificativo risposta non valido.';
       end if;
@@ -121,7 +130,8 @@ $$;
 revoke all on function public.save_quiz(uuid, timestamptz, text, text, jsonb) from public;
 grant execute on function public.save_quiz(uuid, timestamptz, text, text, jsonb) to authenticated;
 
--- Serialize game creation against editor saves using the same quiz row lock.
+-- La creazione di una partita e il salvataggio acquisiscono lo stesso blocco
+-- sulla riga quiz: il controllo delle partite aperte avviene in ordine seriale.
 create or replace function public.lock_game_quiz() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin

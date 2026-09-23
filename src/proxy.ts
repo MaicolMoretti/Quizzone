@@ -1,3 +1,9 @@
+/**
+ * Aggiorna la sessione Supabase e protegge le pagine degli organizzatori.
+ * I cookie rinnovati vengono propagati sia alla richiesta sia alla risposta,
+ * compresi i reindirizzamenti. Il filtro di navigazione non sostituisce RLS
+ * é le verifiche del JWT eseguite dal Game Engine.
+ */
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 

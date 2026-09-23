@@ -1,14 +1,27 @@
+/**
+ * Trasporto Socket.IO condiviso dal browser. Le richieste attendono una
+ * conferma esplicita del server; un timeout non dimostra che il comando sia
+ * fallito, quindi il chiamante deve sincronizzare lo stato prima di riprovare.
+ */
 import { io, type Socket } from 'socket.io-client';
 import type { GameReply, GameState } from './types';
 
 export class GameClientError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
+/**
+ * Crea un socket inizialmente fermo, così il chiamante può registrare tutti
+ * i gestori prima della connessione. Il token è presente solo per il conduttore.
+ */
 export function gameSocket(accessToken?: string): Socket {
   return io(process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'http://localhost:3001', {
     autoConnect: false, auth: { accessToken }, reconnection: true, timeout: 10000,
   });
 }
+/**
+ * Uniforma gli errori di rete e gli errori applicativi restituiti nell’ack.
+ * Non ripete automaticamente i comandi, per evitare operazioni duplicate.
+ */
 export async function request(socket: Socket, event: string, payload: object = {}): Promise<GameReply> {
   if (!socket.connected) throw new GameClientError('DISCONNECTED', 'Connessione interrotta. Attendi la riconnessione.');
   let reply;
@@ -17,6 +30,10 @@ export async function request(socket: Socket, event: string, payload: object = {
   if (!reply.ok) throw new GameClientError(reply.error.code, reply.error.message);
   return reply.data;
 }
+/**
+ * Usa una connessione temporanea per creare la lobby dalla dashboard.
+ * La vista del conduttore aprirà il proprio socket; finally chiude questo.
+ */
 export async function launchGame(quizId: string, accessToken: string): Promise<GameState> {
   const socket = gameSocket(accessToken);
   try {

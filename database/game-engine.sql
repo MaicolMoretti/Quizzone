@@ -1,12 +1,12 @@
--- Run AFTER schema.sql, using the Supabase SQL editor / migration administrator.
--- The Node server alone writes game history, with its server-only service_role key.
+-- Applicare DOPO schema.sql tramite SQL Editor Supabase o utenza amministrativa.
+-- Solo il server Node scrive lo storico tramite la chiave service_role riservata.
 begin;
 
 alter table public.games enable row level security;
 alter table public.game_players enable row level security;
 alter table public.player_answers enable row level security;
 
--- Read-only history for the conductor. Players use Socket.IO, not direct DB access.
+-- Il conduttore legge lo storico; i giocatori comunicano via Socket.IO, senza accesso SQL.
 drop policy if exists "Conductor reads games" on public.games;
 create policy "Conductor reads games" on public.games for select to authenticated
   using (created_by = auth.uid());
@@ -17,6 +17,8 @@ drop policy if exists "Conductor reads answers" on public.player_answers;
 create policy "Conductor reads answers" on public.player_answers for select to authenticated
   using (exists (select 1 from public.games g where g.id = game_id and g.created_by = auth.uid()));
 
+-- RPC riservata al motore: salva l’esito finale senza duplicare invii nei tentativi ripetuti.
+-- SECURITY INVOKER conserva i privilegi del chiamante; EXECUTE è concesso solo a service_role.
 create or replace function public.archive_game(p_game jsonb)
 returns void
 language plpgsql
@@ -29,7 +31,7 @@ begin
   if p_game->>'status' is null or p_game->>'status' not in ('finished', 'expired') then
     raise exception 'Invalid final game status';
   end if;
-  -- Serialize retries and commit players, answers and final status together.
+  -- Serializza i tentativi con un blocco sulla partita e salva giocatori, invii e stato insieme.
   perform 1 from public.games where id = v_game_id for update;
   if not found then raise exception 'Game not found'; end if;
 
@@ -49,6 +51,7 @@ begin
     id uuid, question_id uuid, player_id uuid, answer_id uuid,
     is_correct boolean, points_awarded integer, response_time integer, created_at timestamptz
   )
+  -- Lo stesso invio, identificato dal suo UUID, non deve essere archiviato due volte.
   on conflict (id) do nothing;
 
   update public.games set status = p_game->>'status',

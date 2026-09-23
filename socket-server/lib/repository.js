@@ -1,3 +1,9 @@
+/**
+ * Accesso server-side ad Auth e REST di Supabase tramite fetch nativo di Node.
+ * La chiave privilegiata consente di archiviare i risultati: per questo il
+ * repository verifica esplicitamente identità e diritto di avviare il quiz.
+ * Le credenziali dei giocatori restano nello store, fuori dallo storico SQL.
+ */
 const { GameError } = require('./engine');
 
 class SupabaseRepository {
@@ -5,6 +11,10 @@ class SupabaseRepository {
     this.url = url.replace(/\/$/, '');
     this.key = key;
   }
+  /**
+   * Centralizza timeout, intestazioni e parsing. Gli errori conservano stato
+   * HTTP e codice PostgreSQL senza diffondere risposta privata o chiavi nei log.
+   */
   async request(path, { method = 'GET', body, token, prefer } = {}) {
     const response = await fetch(`${this.url}${path}`, {
       method, signal: AbortSignal.timeout(10000),
@@ -22,6 +32,10 @@ class SupabaseRepository {
     }
     return data;
   }
+  /**
+   * Valida il JWT interrogando Supabase Auth. Distingue una sessione rifiutata
+   * da un’interruzione del servizio, per non confondere rete e autorizzazione.
+   */
   async authenticate(token) {
     if (typeof token !== 'string' || token.length > 8192 || !token) throw new GameError('UNAUTHORIZED', 'Accesso richiesto.');
     try {
@@ -33,6 +47,10 @@ class SupabaseRepository {
       throw error;
     }
   }
+  /**
+   * Controlla proprietario o collaborazione editor prima di leggere le
+   * soluzioni. Esclude i contenuti ritirati e ordina domande e opzioni.
+   */
   async loadQuiz(userId, quizId) {
     const rows = await this.request(`/rest/v1/quizzes?id=eq.${quizId}&select=id,title,owner_id`);
     const quiz = rows[0];
@@ -45,6 +63,10 @@ class SupabaseRepository {
     for (const q of quiz.questions) q.answers = q.answers.filter(a => !a.retired).sort((a, b) => a.answer_order - b.answer_order || a.id.localeCompare(b.id));
     return quiz;
   }
+  /**
+   * Registra subito la lobby. Una violazione di unicità segnala al motore
+   * di tentare un altro codice; gli altri errori interrompono la creazione.
+   */
   async createGame(game) {
     try {
       await this.request('/rest/v1/games', { method: 'POST', body: {
@@ -56,11 +78,18 @@ class SupabaseRepository {
       throw error;
     }
   }
+  /**
+   * Segna la partita come attiva nel database e registra l’istante di avvio.
+   */
   async startGame(game) {
     await this.request(`/rest/v1/games?id=eq.${game.id}`, { method: 'PATCH', body: {
       status: 'active', started_at: new Date(game.startedAt).toISOString(),
     } });
   }
+  /**
+   * Invia una sola RPC transazionale con giocatori, risposte e stato finale.
+   * La proiezione esplicita dei campi esclude token, hash e socket dallo storico.
+   */
   async archive(game) {
     await this.request('/rest/v1/rpc/archive_game', { method: 'POST', body: { p_game: {
       id: game.id, status: game.endReason === 'expired' ? 'expired' : 'finished',

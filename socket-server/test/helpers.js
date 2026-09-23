@@ -1,3 +1,8 @@
+/**
+ * Dati e dipendenze di prova del motore. Il repository registra copie degli
+ * oggetti ricevuti; l’orologio controllabile consente di superare le scadenze
+ * senza attese reali. Nessuna credenziale o richiesta Supabase è necessaria.
+ */
 const { randomUUID } = require('node:crypto');
 const { GameEngine } = require('../lib/engine');
 const { MemoryStore } = require('../lib/store');

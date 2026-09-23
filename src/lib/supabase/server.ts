@@ -1,3 +1,8 @@
+/**
+ * Client Supabase per richieste Next.js, associato ai cookie della richiesta
+ * corrente. Usa la chiave pubblica insieme alla sessione dell’utente, mantenendo
+ * attivi i controlli RLS anche nelle route eseguite sul server.
+ */
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 export async function createClient() {
@@ -7,7 +12,7 @@ export async function createClient() {
       getAll: () => cookieStore.getAll(),
       setAll(values) {
         try { values.forEach(({ name, value, options }) => cookieStore.set(name, value, options)); }
-        catch { /* Server Components cannot write cookies; Proxy refreshes sessions. */ }
+        catch { /* I Server Component non scrivono cookie: il proxy rinnova la sessione. */ }
       },
     },
   });

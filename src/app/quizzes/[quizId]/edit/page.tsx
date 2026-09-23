@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * Editor del contenuto persistito: domande, opzioni, immagini, tempi e punti.
+ * Le modifiche restano locali fino al salvataggio atomico tramite save_quiz.
+ * updated_at è la versione attesa: il database rifiuta il salvataggio quando
+ * un’altra sessione ha modificato il quiz o esiste una partita ancora aperta.
+ */
+
+
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -9,6 +17,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/client';
 import { newQuestion, validateQuestions, type Question, type Quiz } from '@/lib/quiz';
 
+// Il pulsante di trascinamento è separato da selezione e rimozione; supporta anche la tastiera.
 function QuestionTab({ question, index, selected, select, remove }: { question: Question; index: number; selected: boolean; select: () => void; remove: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: question.id });
   return <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`flex items-center gap-2 rounded-xl border p-3 ${selected ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white'}`}>
@@ -37,6 +46,7 @@ export default function QuizEditorPage() {
         const { data, error } = await supabase.from('quizzes').select('*,questions(*,answers(*))').eq('id', quizId).single();
         if (error) throw error;
         if (cancelled) return;
+        // Gli elementi ritirati restano nel DB per lo storico, ma non tornano nell’editor.
         const loaded: Question[] = data.questions.filter((q: Question & { retired: boolean }) => !q.retired)
           .sort((a: Question, b: Question) => (a.question_order || 0) - (b.question_order || 0))
           .map((q: Question) => ({ ...q, answers: q.answers.filter(a => !a.retired).sort((a, b) => (a.answer_order || 0) - (b.answer_order || 0)) }));
@@ -50,6 +60,7 @@ export default function QuizEditorPage() {
   }, [quizId, supabase]);
 
   useEffect(() => {
+    // Avvisa alla chiusura/ricarica della pagina quando ci sono modifiche locali.
     const warn = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
@@ -58,10 +69,12 @@ export default function QuizEditorPage() {
   function update(id: string, patch: Partial<Question>) {
     setQuestions(previous => previous.map(q => q.id === id ? { ...q, ...patch } : q)); setDirty(true);
   }
+  // La selezione usa l’UUID: spostare una domanda non cambia quella in modifica.
   function reorder({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return;
     setQuestions(previous => arrayMove(previous, previous.findIndex(q => q.id === active.id), previous.findIndex(q => q.id === over.id))); setDirty(true);
   }
+  // Un’unica RPC salva quiz, domande e risposte oppure annulla tutto in caso di errore.
   async function save() {
     if (!quiz || saving) return;
     const validation = validateQuestions(questions);
@@ -71,6 +84,7 @@ export default function QuizEditorPage() {
       const { data, error } = await supabase.rpc('save_quiz', { p_quiz_id: quizId, p_expected_updated_at: quiz.updated_at,
         p_title: quiz.title, p_description: quiz.description, p_questions: questions });
       if (error) throw new Error(error.message);
+      // La versione restituita diventa la precondizione del prossimo salvataggio.
       setQuiz({ ...quiz, updated_at: data }); setDirty(false);
     } catch (e) { setError(e instanceof Error ? e.message : 'Salvataggio non riuscito.'); }
     finally { setSaving(false); }

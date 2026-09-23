@@ -1,3 +1,8 @@
+/**
+ * Verifica delle migrazioni su PostgreSQL WASM (PGlite), senza credenziali reali.
+ * Ricrea ruoli e auth.uid() di Supabase, poi esercita RLS, RPC, conflitti di
+ * versione, blocco durante le partite e conservazione degli identificativi storici.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -10,9 +15,10 @@ const quizId = randomUUID();
 const question = () => ({ id: randomUUID(), question_text: 'Quanto fa 2 + 2?', preview_seconds: 0, answer_seconds: 10, correct_points: 100, wrong_points: -10,
   answers: [{ id: randomUUID(), answer_text: '4', is_correct: true }, { id: randomUUID(), answer_text: '5', is_correct: false }] });
 
-test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game protection and historical IDs', async () => {
+test('Migrazioni PostgreSQL: salvataggio atomico, RLS, conflitti, partite aperte e storico', async () => {
   const db = new PGlite({ extensions: { uuid_ossp } });
   try {
+    // Emula il contesto che Supabase fornisce normalmente a PostgreSQL tramite il JWT.
     await db.exec(`create schema auth;
       create role anon; create role authenticated; create role service_role bypassrls;
       create table auth.users(id uuid primary key);
@@ -26,11 +32,12 @@ test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game prote
     const engineSQL = await readFile(new URL('../database/game-engine.sql', import.meta.url), 'utf8');
     const editorSQL = await readFile(new URL('../database/editor.sql', import.meta.url), 'utf8');
     await db.exec(engineSQL); await db.exec(editorSQL);
-    await db.exec(engineSQL); await db.exec(editorSQL); // Migration re-application.
+    await db.exec(engineSQL); await db.exec(editorSQL); // Verifica che le migrazioni possano essere applicate di nuovo.
     for (const id of [owner, editor, viewer, outsider]) await db.query('insert into auth.users(id) values($1)', [id]);
     const insertFix = await readFile(new URL('../database/fix-quiz-creation.sql', import.meta.url), 'utf8');
     await db.exec(insertFix); await db.exec(insertFix);
-    // Match the real browser INSERT ... RETURNING under the authenticated role.
+    // Copre INSERT ... RETURNING con il ruolo autenticato, anche se la route attuale
+    // restituisce un UUID generato sul server senza richiedere RETURNING al database.
     await db.exec('set role authenticated');
     await db.query("select set_config('request.jwt.claim.sub', $1, false)", [owner]);
     const result = await db.query('insert into quizzes(id, title, owner_id) values($1, $2, $3) returning updated_at::text', [quizId, 'Prima versione', owner]);
@@ -38,6 +45,7 @@ test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game prote
     await assert.rejects(db.query('insert into quizzes(title, owner_id) values($1,$2) returning id', ['Impersonation', outsider]), /row-level security/);
     await db.exec('reset role');
     await db.query("insert into quiz_collaborators(quiz_id,user_id,role) values($1,$2,'editor'),($1,$3,'viewer')", [quizId, editor, viewer]);
+    // Cambia ruolo SQL e identità per verificare accessi consentiti e vietati sugli stessi dati.
     const login = async (user = owner, role = 'authenticated') => {
       await db.exec(`reset role; set role ${role}`);
       await db.query("select set_config('request.jwt.claim.sub', $1, false)", [user]);
@@ -50,6 +58,7 @@ test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game prote
     await login();
     version = await save([first, second]);
     assert.equal((await db.query('select count(*)::int as n from questions where not retired')).rows[0].n, 2);
+    // Un errore a metà salvataggio deve ripristinare anche gli elementi marcati retired.
     const invalid = structuredClone(first); invalid.answers[0].is_correct = false;
     await assert.rejects(save([invalid]), /almeno una risposta corretta/);
     assert.equal((await db.query('select count(*)::int as n from questions where not retired')).rows[0].n, 2, 'failed save rolls back retirement');
@@ -78,6 +87,8 @@ test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game prote
     await assert.rejects(save([first]), /Concludi le partite/);
     await assert.rejects(db.query('select archive_game($1)', ['{}']), /permission denied/);
     await login(owner, 'service_role');
+    // Ripete l’archivio dello stesso esito e poi rimuove una domanda dall’editor:
+    // le risposte storiche devono restare singole e con riferimenti ancora validi.
     const archive = { id: gameId, status: 'finished', started_at: new Date().toISOString(), ended_at: new Date().toISOString(),
       players: [{ id: playerId, nickname: 'Anna', score: 100, joined_at: new Date().toISOString(), last_seen_at: new Date().toISOString() }],
       answers: [{ id: answerId, question_id: first.id, player_id: playerId, answer_id: first.answers[0].id, is_correct: true, points_awarded: 100, response_time: 200, created_at: new Date().toISOString() }] };

@@ -1,7 +1,7 @@
--- Enable UUID extension
+-- Abilita l’estensione che genera gli UUID delle righe.
 create extension if not exists "uuid-ossp";
 
--- 1. Quizzes Table
+-- 1. Quiz: metadati, proprietario e stato editoriale.
 create table quizzes (
     id uuid primary key default uuid_generate_v4(),
     title text not null,
@@ -13,7 +13,7 @@ create table quizzes (
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 2. Quiz Collaborators
+-- 2. Collaboratori: editor modifica, viewer può leggere il contenuto del quiz.
 create table quiz_collaborators (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -23,7 +23,7 @@ create table quiz_collaborators (
     unique(quiz_id, user_id)
 );
 
--- 3. Questions
+-- 3. Domande: ordine, testo, immagine, tempi in secondi e punteggi.
 create table questions (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -38,7 +38,7 @@ create table questions (
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 4. Answers
+-- 4. Opzioni: ordine e correttezza, mai leggibili direttamente dai giocatori anonimi.
 create table answers (
     id uuid primary key default uuid_generate_v4(),
     question_id uuid references questions(id) on delete cascade not null,
@@ -47,7 +47,7 @@ create table answers (
     is_correct boolean not null default false
 );
 
--- 5. Games (Sessions)
+-- 5. Partite: codice pubblico, conduttore e stato sintetico dello storico.
 create table games (
     id uuid primary key default uuid_generate_v4(),
     quiz_id uuid references quizzes(id) on delete cascade not null,
@@ -59,7 +59,7 @@ create table games (
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 6. Game Players
+-- 6. Giocatori: nickname e punteggio finale della singola partita.
 create table game_players (
     id uuid primary key default uuid_generate_v4(),
     game_id uuid references games(id) on delete cascade not null,
@@ -71,7 +71,7 @@ create table game_players (
     unique(game_id, nickname)
 );
 
--- 7. Player Answers (History)
+-- 7. Invii storici: risposta scelta, correttezza, punti e tempo impiegato.
 create table player_answers (
     id uuid primary key default uuid_generate_v4(),
     game_id uuid references games(id) on delete cascade not null,
@@ -80,13 +80,13 @@ create table player_answers (
     answer_id uuid references answers(id) on delete cascade not null,
     is_correct boolean not null,
     points_awarded integer not null,
-    response_time integer not null, -- ms taken to respond
+    response_time integer not null, -- millisecondi trascorsi prima dell’invio
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- RLS (Row Level Security) setup
+-- Configurazione RLS: permessi di accesso alle singole righe.
 
--- Quizzes
+-- Policy iniziali per i quiz; editor.sql completa e aggiorna i permessi.
 alter table quizzes enable row level security;
 create policy "Users can view their own quizzes or collaborated quizzes" on quizzes
     for select using (
@@ -103,5 +103,6 @@ create policy "Users can update their own quizzes or if editor" on quizzes
 create policy "Users can delete their own quizzes" on quizzes
     for delete using (auth.uid() = owner_id);
 
--- Apply basic allow-all for now during development phase, can be locked down later
--- (Add policies for other tables here)
+-- Schema di base storico: da solo NON è una configurazione completa.
+-- Applicare anche game-engine.sql ed editor.sql prima di usare l’applicazione.
+-- Per un database nuovo preferire setup.sql, che abilita tutte le RLS nella stessa transazione.

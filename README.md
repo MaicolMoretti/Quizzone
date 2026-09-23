@@ -94,3 +94,32 @@ I servizi Auth/REST del browser test sono simulati; i permessi SQL sono verifica
 separatamente dai test PostgreSQL. Tracce e screenshot sono in `test-results/`.
 Se Turbopack non può aprire porte nel proprio ambiente, è disponibile anche
 `npm run build -- --webpack`.
+
+## Telefoni e rete locale
+
+Con computer e telefono sulla stessa rete Wi-Fi:
+
+```sh
+npm run configure:lan
+```
+
+Il comando configura `NEXT_PUBLIC_APP_URL` (link e QR),
+`NEXT_PUBLIC_GAME_SERVER_URL` e le origini ammesse dal Game Engine, senza stampare
+le chiavi Supabase. Poi **riavvia entrambi i server** e apri l'indirizzo stampato.
+Il QR usa questo indirizzo anche se il conduttore ha aperto la dashboard su localhost.
+Ripeti il comando se cambi rete/IP. Con più interfacce puoi indicare l'indirizzo:
+`npm run configure:lan -- 192.168.1.11`.
+
+Il telefono deve poter raggiungere le porte 3000 e 3001 del computer. Una rete ospiti
+con isolamento dei dispositivi o un firewall può impedirlo anche se il Wi-Fi è lo stesso.
+In produzione configura invece gli URL HTTPS pubblici del frontend e del motore.
+
+Per installazioni create con la policy originale che bloccava la creazione del quiz,
+eseguire **solo** `database/fix-quiz-creation.sql` nel SQL Editor di Supabase.
+Non rieseguire il setup iniziale. La correzione mantiene i controlli sul proprietario
+ed è già inclusa nelle versioni aggiornate di `setup.sql` ed `editor.sql`.
+
+La suite `test:e2e` comprende anche `tests/browser/mobile.spec.ts`: QR decodificato
+dai pixel renderizzati, inserimento codice, tocchi, nickname, riconnessione, refresh,
+classifica e controlli del conduttore con viewport e input touch mobili in Chrome.
+Questa emulazione non sostituisce una prova con fotocamera e Safari su un iPhone fisico.

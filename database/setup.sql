@@ -194,7 +194,7 @@ revoke all on function public.quiz_access(uuid, boolean), public.quiz_owner(uuid
 grant execute on function public.quiz_access(uuid, boolean), public.quiz_owner(uuid) to authenticated;
 
 create policy "Users can view their own quizzes or collaborated quizzes" on public.quizzes
-  for select to authenticated using (public.quiz_access(id));
+  for select to authenticated using (owner_id = (select auth.uid()) or public.quiz_access(id));
 create policy "Users can update their own quizzes or if editor" on public.quizzes
   for update to authenticated using (public.quiz_access(id, true)) with check (public.quiz_access(id, true));
 create policy "Collaborator visibility" on public.quiz_collaborators for select to authenticated

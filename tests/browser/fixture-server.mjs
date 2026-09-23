@@ -28,7 +28,7 @@ app.get('/rest/v1/quizzes', (req, res) => {
   res.json([...quizzes.values()]);
 });
 app.post('/rest/v1/quizzes', (req, res) => {
-  const quiz = { ...req.body, id: randomUUID(), updated_at: new Date().toISOString(), questions: [] };
+  const quiz = { ...req.body, id: req.body.id || randomUUID(), updated_at: new Date().toISOString(), questions: [] };
   quizzes.set(quiz.id, quiz); res.status(201).json(quiz);
 });
 app.get('/rest/v1/games', (_req, res) => res.json([...games.values()].filter(g => ['waiting', 'active'].includes(g.status))));
@@ -48,7 +48,7 @@ const repository = {
   async archive(game) { games.get(game.id).status = 'finished'; archives.push(structuredClone(game)); },
 };
 const api = app.listen(54325, '127.0.0.1');
-const server = await createGameServer({ store: new MemoryStore(), repository, origins: ['http://127.0.0.1:3100'] });
+const server = await createGameServer({ store: new MemoryStore(), repository, origins: ['http://127.0.0.1:3100', 'http://localhost:3100'] });
 await server.listen(3101, '127.0.0.1');
 const close = async () => { await server.close(); api.close(); };
 process.once('SIGTERM', close); process.once('SIGINT', close);

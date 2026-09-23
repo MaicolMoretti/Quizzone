@@ -28,6 +28,8 @@ test('PostgreSQL migrations: atomic editor save, RLS, conflicts, live-game prote
     await db.exec(engineSQL); await db.exec(editorSQL);
     await db.exec(engineSQL); await db.exec(editorSQL); // Migration re-application.
     for (const id of [owner, editor, viewer, outsider]) await db.query('insert into auth.users(id) values($1)', [id]);
+    const insertFix = await readFile(new URL('../database/fix-quiz-creation.sql', import.meta.url), 'utf8');
+    await db.exec(insertFix); await db.exec(insertFix);
     // Match the real browser INSERT ... RETURNING under the authenticated role.
     await db.exec('set role authenticated');
     await db.query("select set_config('request.jwt.claim.sub', $1, false)", [owner]);

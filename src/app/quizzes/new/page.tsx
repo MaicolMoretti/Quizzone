@@ -1,9 +1,14 @@
 "use client";
 
+// Hook React per gestire i valori del form e lo stato della richiesta.
 import { useState } from "react";
+// Hook Next.js per navigare verso l'editor dopo la creazione.
 import { useRouter } from "next/navigation";
+// Icone utilizzate nei controlli della pagina.
 import { ArrowLeft, Loader2 } from "lucide-react";
+// Collegamento client-side alla dashboard.
 import Link from "next/link";
+// Componente usato per l'animazione di ingresso del modulo.
 import { motion } from "framer-motion";
 
 /**
@@ -21,6 +26,7 @@ export default function NewQuizPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Il router evita un ricaricamento completo quando apre l'editor.
   const router = useRouter();
 
   /**
@@ -37,9 +43,13 @@ export default function NewQuizPage() {
 
     try {
       // La route server esegue autenticazione, validazione e INSERT con RLS.
+      // Il browser invia solo i dati modificabili: l'owner viene determinato
+      // server-side dalla sessione e non può essere falsificato dal form.
       const response = await fetch("/api/quizzes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // JSON.stringify serializza i valori controllati da React nel payload
+        // JSON previsto dalla route API.
         body: JSON.stringify({ title, description }),
       });
 
@@ -68,6 +78,8 @@ export default function NewQuizPage() {
   };
 
   return (
+    // La pagina occupa almeno tutta l'altezza della viewport e usa un fondo
+    // neutro per mantenere il modulo leggibile.
     <div className="min-h-screen p-8 bg-gray-50">
       {/* Intestazione: consente di tornare alla dashboard senza inviare il form. */}
       <header className="max-w-3xl mx-auto mb-8 flex items-center gap-4">
@@ -82,6 +94,8 @@ export default function NewQuizPage() {
 
       {/* Contenitore principale del modulo di creazione. */}
       <main className="max-w-3xl mx-auto">
+        {/* L'animazione comunica l'ingresso del modulo senza influire sulla
+          logica di invio o sulla dimensione dei controlli. */}
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -94,6 +108,7 @@ export default function NewQuizPage() {
                 <label htmlFor="title" className="block text-sm font-bold text-gray-700 mb-2">
                   Titolo del Quiz
                 </label>
+                {/* Input controllato: ogni modifica aggiorna title nello stato. */}
                 <input
                   id="title"
                   type="text"
@@ -110,6 +125,7 @@ export default function NewQuizPage() {
                 <label htmlFor="description" className="block text-sm font-bold text-gray-700 mb-2">
                   Descrizione (opzionale)
                 </label>
+                {/* Textarea controllata per la descrizione facoltativa. */}
                 <textarea
                   id="description"
                   rows={3}
@@ -122,6 +138,7 @@ export default function NewQuizPage() {
 
               {/* Messaggio di errore restituito dalla route server. */}
               {error && (
+                // Il blocco viene renderizzato solo quando la richiesta fallisce.
                 <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
                   {error}
                 </div>
@@ -134,7 +151,9 @@ export default function NewQuizPage() {
                   disabled={loading || !title.trim()}
                   className="flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-purple-200 hover:shadow-xl hover:-translate-y-0.5 transition-all disabled:opacity-70 disabled:hover:translate-y-0"
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Crea e procedi all'editor"}
+                    {/* Lo spinner segnala l'attesa; il testo normale invita alla
+                      creazione quando non è in corso una richiesta. */}
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Crea e procedi all'editor"}
                 </button>
               </div>
             </form>

@@ -22,9 +22,9 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
   const revealed = state?.question?.answers?.some(a => typeof a.is_correct === 'boolean');
   const selected = state?.question?.answers?.find(a => a.id === game.selectedAnswer);
   const ownRank = state?.leaderboard?.find(p => p.id === game.playerId);
-  const playUrl = state && typeof window !== 'undefined' ? `${window.location.origin}/play/${state.gameCode}` : '';
+  const playUrl = state && typeof window !== 'undefined' ? `${(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '')}/play/${state.gameCode}` : '';
 
-  return <main className={`min-h-screen bg-slate-950 text-white ${role === 'presentation' ? 'p-8 lg:p-12' : 'p-4 sm:p-8'}`}>
+  return <main className={`min-h-dvh bg-slate-950 text-white ${role === 'presentation' ? 'p-8 lg:p-12' : 'p-4 sm:p-8'}`}>
     <div className="mx-auto max-w-6xl">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <Link href={isAdmin ? '/dashboard' : '/'} className="text-xl font-black tracking-tight">Quizzone<span className="text-purple-400">.</span></Link>
@@ -32,32 +32,33 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
         {state && <span className="rounded-full bg-white/10 px-4 py-2">Codice <strong className="tracking-widest">{state.gameCode}</strong></span>}
       </header>
       {game.error && <div role="alert" className="mb-6 rounded-xl border border-rose-400/40 bg-rose-950 p-4"><p>{game.error}</p><button onClick={game.reconnect} className="mt-2 underline">Riconnetti</button></div>}
-      {isPlayer && !joined && !state && <form className="mx-auto max-w-md space-y-5 rounded-3xl bg-white p-8 text-slate-900" onSubmit={e => { e.preventDefault(); void game.join(nickname); }}>
+      {isPlayer && !joined && !state && <form className="mx-auto max-w-md space-y-5 rounded-3xl bg-white p-8 text-slate-900" onSubmit={e => { e.preventDefault(); if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur(); void game.join(nickname); }}>
         <h1 className="text-3xl font-bold">Entra in partita</h1><p>Codice {identifier}</p>
-        <label className="block">Come ti chiami?<input className="field" autoComplete="nickname" maxLength={32} required value={nickname} onChange={e => setNickname(e.target.value)} /></label>
-        <button className="action w-full" disabled={!connected || busy || !nickname.trim()}>{busy ? 'Ingresso…' : 'Partecipa'}</button>
+        <label className="block">Come ti chiami?<input className="field" name="nickname" autoComplete="nickname" autoCapitalize="none" spellCheck={false} enterKeyHint="go" maxLength={32} required value={nickname} onChange={e => setNickname(e.target.value)} /></label>
+        <button type="submit" className="action w-full" disabled={!connected || busy || !nickname.trim()}>{busy ? 'Ingresso…' : !connected ? 'Connessione…' : 'Partecipa'}</button>
+        {!connected && <p className="text-sm text-gray-600">Attendi la connessione alla partita. Se non si connette, controlla la rete e l’indirizzo del link.</p>}
       </form>}
       {!state && !isPlayer && <p role="status">Caricamento della partita…</p>}
       {state && <>
         <div className="mb-8 flex items-center justify-between gap-5">
-          <div><p className="mb-2 text-purple-300">{state.title}{state.currentQuestionIndex >= 0 && ` · ${state.currentQuestionIndex + 1}/${state.totalQuestions}`}</p><h1 className="text-3xl font-black sm:text-5xl">{labels[state.status]}</h1></div>
+          <div className="min-w-0"><p className="mb-2 break-words text-purple-300">{state.title}{state.currentQuestionIndex >= 0 && ` · ${state.currentQuestionIndex + 1}/${state.totalQuestions}`}</p><h1 className="text-3xl font-black sm:text-5xl">{labels[state.status]}</h1></div>
           {state.deadline && <div role="timer" aria-label={`${state.timer} secondi rimanenti`} className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-4 border-purple-400 text-3xl font-black tabular-nums">{state.timer}</div>}
         </div>
         {state.status === 'LOBBY' && <div className="grid gap-8 md:grid-cols-[1fr_300px]">
           <section className="rounded-3xl bg-white/5 p-6"><h2 className="mb-5 text-2xl font-bold">{state.playersCount} partecipanti</h2>
-            <div className="flex flex-wrap gap-3">{state.players.map(p => <span key={p.id} className="rounded-xl bg-white/10 px-4 py-3">{p.nickname}{!p.connected && ' · offline'}</span>)}</div>
+            <div className="flex flex-wrap gap-3">{state.players.map(p => <span key={p.id} className="max-w-full break-words rounded-xl bg-white/10 px-4 py-3">{p.nickname}{!p.connected && ' · offline'}</span>)}</div>
             {isPlayer && <p className="mt-6 text-purple-200">Sei dentro! La partita inizierà quando il conduttore sarà pronto.</p>}
             {!state.playersCount && <p>Condividi il codice per far entrare i giocatori.</p>}
           </section>
-          {!isPlayer && <aside className="rounded-3xl bg-white p-6 text-center text-slate-900"><QRCodeSVG value={playUrl} size={220} className="mx-auto h-auto max-w-full" title="Scansiona per entrare nella partita" /><p className="my-4 text-3xl font-black tracking-widest">{state.gameCode}</p><button className="text-purple-700 underline" onClick={async () => { try { await navigator.clipboard.writeText(playUrl); setCopied(true); } catch { setCopied(false); } }}>{copied ? 'Link copiato' : 'Copia link di invito'}</button><a href={playUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-xs">{playUrl}</a></aside>}
+          {!isPlayer && <aside className="rounded-3xl bg-white p-6 text-center text-slate-900"><QRCodeSVG value={playUrl} size={220} marginSize={4} level="M" className="mx-auto h-auto max-w-full" title="Scansiona per entrare nella partita" /><p className="my-4 text-3xl font-black tracking-widest">{state.gameCode}</p><button className="text-purple-700 underline" onClick={async () => { try { await navigator.clipboard.writeText(playUrl); setCopied(true); } catch { setCopied(false); } }}>{copied ? 'Link copiato' : 'Copia link di invito'}</button><a href={playUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-xs">{playUrl}</a></aside>}
         </div>}
         {state.question && !ranking && state.status !== 'NEXT_QUESTION' && <section className="space-y-6">
-          <h2 className="text-center text-2xl font-bold sm:text-4xl">{state.question.question_text}</h2>
+          <h2 className="break-words text-center text-2xl font-bold sm:text-4xl">{state.question.question_text}</h2>
           {state.question.image_url && /^https?:\/\//i.test(state.question.image_url) && <img src={state.question.image_url} alt="Immagine della domanda" className="mx-auto max-h-72 rounded-2xl object-contain" />}
           <div className="grid gap-4 sm:grid-cols-2">{state.question.answers?.map((a, i) => <button key={a.id}
             disabled={!isPlayer || !joined || !connected || busy || state.status !== 'QUESTION_ACTIVE' || !!game.selectedAnswer || state.timer === 0}
             onClick={() => void game.submit(a.id)}
-            className={`min-h-28 rounded-2xl p-5 text-left text-xl font-bold transition ${colors[i % 4]} ${revealed && !a.is_correct ? 'opacity-40' : ''} ${a.id === game.selectedAnswer ? 'ring-4 ring-white ring-offset-4 ring-offset-slate-950' : ''} enabled:hover:brightness-110`}>
+            className={`min-h-28 rounded-2xl p-5 break-words text-left text-xl font-bold transition ${colors[i % 4]} ${revealed && !a.is_correct ? 'opacity-40' : ''} ${a.id === game.selectedAnswer ? 'ring-4 ring-white ring-offset-4 ring-offset-slate-950' : ''} enabled:hover:brightness-110`}>
             <span className="mr-4 opacity-70">{String.fromCharCode(65 + i)}</span>{' '}{a.answer_text}{a.is_correct === true && <span className="ml-3">✓ Corretta</span>}
             {revealed && <span className="mt-2 block text-sm">{state.statistics?.find(s => s.answerId === a.id)?.percentage || 0}% delle risposte</span>}
           </button>)}</div>
@@ -65,8 +66,8 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
           {isPlayer && revealed && ownRank && <p className="text-center text-xl font-bold">Il tuo punteggio: {ownRank.score} · Posizione {ownRank.rank}</p>}
         </section>}
         {ranking && <section className="mx-auto max-w-3xl space-y-3">
-          {isFinal && state.leaderboard?.[0] && <p className="mb-8 text-center text-3xl">🏆 {state.leaderboard.filter(p => p.rank === 1).map(p => p.nickname).join(' e ')}</p>}
-          {state.leaderboard?.map(p => <div key={p.id} className={`flex items-center gap-5 rounded-2xl p-5 ${p.id === game.playerId ? 'bg-purple-600' : 'bg-white/10'}`}><span className="text-2xl font-black">{p.rank}</span><span className="flex-1 text-xl">{p.nickname}</span><strong className="text-xl">{p.score} punti</strong></div>)}
+          {isFinal && state.leaderboard?.[0] && <p className="mb-8 break-words text-center text-3xl [overflow-wrap:anywhere]">🏆 {state.leaderboard.filter(p => p.rank === 1).map(p => p.nickname).join(' e ')}</p>}
+          {state.leaderboard?.map(p => <div key={p.id} className={`flex items-center gap-5 rounded-2xl p-5 ${p.id === game.playerId ? 'bg-purple-600' : 'bg-white/10'}`}><span className="text-2xl font-black">{p.rank}</span><span className="min-w-0 flex-1 break-words text-xl">{p.nickname}</span><strong className="text-xl">{p.score} punti</strong></div>)}
           {!state.leaderboard?.length && <p>Nessun giocatore in classifica.</p>}
           {state.status === 'ENDED' && <p className="pt-5 text-center text-purple-200">{state.endReason === 'expired' ? 'La partita è scaduta.' : 'Grazie per aver giocato!'} <Link className="underline" href={isAdmin ? '/dashboard' : '/'}>Torna {isAdmin ? 'alla dashboard' : 'alla home'}</Link></p>}
         </section>}

@@ -35,6 +35,7 @@ export function useGame(role: GameRole, identifier: string) {
     let disposed = false;
     let socket: Socket;
     let unsubscribe: (() => void) | undefined;
+    let removeNetworkListeners: (() => void) | undefined;
     const showError = (e: unknown) => { if (!disposed) setError(e instanceof Error ? e.message : 'Connessione non riuscita.'); };
     async function connect() {
       let token: string | undefined;
@@ -57,6 +58,22 @@ export function useGame(role: GameRole, identifier: string) {
         try { sessionRef.current = JSON.parse(localStorage.getItem(sessionKey) || 'null'); } catch { /* A new session can still be created. */ }
       }
       socket = gameSocket(token); socketRef.current = socket;
+      let removed = false;
+      const offline = () => socket.disconnect();
+      const online = () => { if (!removed && !disposed && !socket.connected) socket.connect(); };
+      const resume = () => {
+        if (document.visibilityState !== 'visible' || removed || disposed) return;
+        if (!socket.connected) online();
+        else if (stateRef.current) void request(socket, 'game:sync').then(result => { if (!disposed) acceptReply(result); }).catch(() => {});
+      };
+      window.addEventListener('offline', offline);
+      window.addEventListener('online', online);
+      document.addEventListener('visibilitychange', resume);
+      removeNetworkListeners = () => {
+        window.removeEventListener('offline', offline);
+        window.removeEventListener('online', online);
+        document.removeEventListener('visibilitychange', resume);
+      };
       socket.on('game:state_update', (next: GameState) => { if (!disposed) accept(next); });
       socket.on('game:timer_update', (tick: { gameId: string; revision: number; timer: number; deadline: number; serverTime: number }) => {
         const current = stateRef.current;
@@ -66,8 +83,8 @@ export function useGame(role: GameRole, identifier: string) {
       });
       socket.on('connect_error', () => showError(new Error('Server di gioco non raggiungibile. Nuovo tentativo in corso…')));
       socket.on('disconnect', () => { if (!disposed) { setConnected(false); setJoined(false); } });
-      socket.on('player:kicked', () => { showError(new Error('Il conduttore ti ha rimosso dalla partita.')); });
-      socket.on('player:session_replaced', () => showError(new Error('La tua sessione è aperta su un altro dispositivo o scheda.')));
+      socket.on('player:kicked', () => { removed = true; showError(new Error('Il conduttore ti ha rimosso dalla partita.')); });
+      socket.on('player:session_replaced', () => { removed = true; showError(new Error('La tua sessione è aperta su un altro dispositivo o scheda.')); });
       socket.on('connect', async () => {
         if (disposed) return;
         setConnected(true); setError('');
@@ -85,7 +102,7 @@ export function useGame(role: GameRole, identifier: string) {
       socket.connect();
     }
     void connect().catch(showError);
-    return () => { disposed = true; unsubscribe?.(); socket?.removeAllListeners(); socket?.disconnect(); socketRef.current = null; };
+    return () => { disposed = true; unsubscribe?.(); removeNetworkListeners?.(); socket?.removeAllListeners(); socket?.disconnect(); socketRef.current = null; };
   }, [role, identifier, sessionKey, attempt, accept, acceptReply]);
 
   async function perform(event: string, payload: object = {}) {

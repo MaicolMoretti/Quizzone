@@ -22,7 +22,7 @@ alter table public.questions enable row level security;
 alter table public.answers enable row level security;
 drop policy if exists "Users can view their own quizzes or collaborated quizzes" on public.quizzes;
 create policy "Users can view their own quizzes or collaborated quizzes" on public.quizzes
-  for select to authenticated using (public.quiz_access(id));
+  for select to authenticated using (owner_id = (select auth.uid()) or public.quiz_access(id));
 drop policy if exists "Users can update their own quizzes or if editor" on public.quizzes;
 create policy "Users can update their own quizzes or if editor" on public.quizzes
   for update to authenticated using (public.quiz_access(id, true)) with check (public.quiz_access(id, true));

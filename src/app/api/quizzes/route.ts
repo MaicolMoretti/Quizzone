@@ -1,3 +1,5 @@
+// Importa il client Supabase server-side, configurato per leggere la sessione
+// autenticata dai cookie gestiti da Next.js.
 import { createClient } from "@/lib/supabase/server";
 
 /**

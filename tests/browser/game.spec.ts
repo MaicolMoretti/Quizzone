@@ -51,18 +51,21 @@ test('Creazione, salvataggio, ricarica, avvio e partita fino all’archivio nell
     await expect(player.getByText('Risposta inviata. Attendi la soluzione.')).toBeVisible();
     await player.reload();
     await expect(player.getByText('Risposta inviata. Attendi la soluzione.')).toBeVisible();
-    await page.getByRole('button', { name: 'Chiudi le risposte' }).click();
     await page.getByRole('button', { name: 'Rivela la soluzione' }).click();
     await expect(player.getByText('Risposta corretta!', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Mostra la classifica' }).click();
-    await expect(screen.getByText('100 punti', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Prosegui' }).click();
+    await page.getByRole('button', { name: 'Mostra classifica' }).click();
+    await expect(screen.getByText(/^\d+ punti$/)).toBeVisible();
+    const score = Number((await screen.getByText(/^\d+ punti$/).innerText()).split(' ')[0]);
+    expect(score).toBeGreaterThanOrEqual(1); expect(score).toBeLessThanOrEqual(100);
+    await expect(player.getByText(`${score} punti`, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Mostra risultati finali' }).click();
     await expect(player.getByRole('heading', { name: 'Il podio finale' })).toBeVisible();
     await page.getByRole('button', { name: 'Concludi e archivia' }).click();
     await expect(player.getByRole('heading', { name: 'Partita conclusa' })).toBeVisible();
     const archive = await (await request.get('http://127.0.0.1:54325/test/archive')).json();
     expect(archive).toHaveLength(1);
-    expect(archive[0].players[0].score).toBe(100);
+    expect(archive[0].players[0].score).toBe(score);
+    expect(archive[0].submissions[0].points_awarded).toBe(score);
     expect(archive[0].submissions).toHaveLength(1);
   } finally { await playerContext.close(); await screen.close(); }
 });

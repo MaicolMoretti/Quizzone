@@ -34,6 +34,12 @@ Per il funzionamento corretto:
 La chiave `service_role` non serve alla route Next.js e non deve essere inserita
 nel frontend: è riservata al processo Game Engine e al suo archivio server-side.
 
+Le richieste Auth e REST del browser passano da `/api/supabase` sul server
+Next.js, che contatta il progetto configurato in `NEXT_PUBLIC_SUPABASE_URL`.
+Questo evita errori di rete dovuti all'accesso diretto a Supabase dal browser.
+Il proxy inoltra la chiave pubblica e il JWT dell'utente: autenticazione e RLS
+restano gestite da Supabase. Il server Next.js deve poter raggiungere Supabase.
+
 ## Indice
 
 - [Funzionalità disponibili](#funzionalità-disponibili)
@@ -340,20 +346,25 @@ Le partite aperte compaiono nella dashboard del loro creatore. Ricaricare la pag
 ## Regole, timer e punteggi
 
 ```text
-LOBBY
-  → QUESTION_PREVIEW     lettura della domanda, senza opzioni
-  → QUESTION_ACTIVE      invio della risposta
-  → QUESTION_LOCKED      invii chiusi e punti calcolati
-  → ANSWER_REVEAL        soluzione e statistiche
-  → LEADERBOARD          classifica
-  → NEXT_QUESTION        passaggio alla prossima domanda
-  → QUESTION_PREVIEW     ripetizione del ciclo
-
-Dopo l’ultima classifica:
-LEADERBOARD → FINAL_RESULTS → ENDED
+LOBBY → QUESTION_PREVIEW → QUESTION_ACTIVE → QUESTION_LOCKED
+                                             ├→ LEADERBOARD (scelta host)
+                                             ├→ ANSWER_REVEAL (facoltativa)
+                                             │    ├→ LEADERBOARD (scelta host)
+                                             │    └→ domanda successiva / FINAL_RESULTS
+                                             └→ domanda successiva / FINAL_RESULTS
+LEADERBOARD → domanda successiva / FINAL_RESULTS → ENDED
 ```
 
-La preview e la fase di risposta terminano automaticamente secondo le scadenze del server. `NEXT_QUESTION` passa alla preview al controllo periodico successivo. Le altre transizioni sono guidate dal conduttore. Un comando amministrativo include la revisione corrente: una scheda non aggiornata o un doppio clic non possono saltare una fase.
+La preview termina alla scadenza del server. Le risposte si chiudono quando tutti
+i partecipanti non espulsi hanno risposto, allo scadere del tempo o su comando del
+conduttore. I partecipanti disconnessi restano attesi fino alla scadenza.
+In `QUESTION_LOCKED` e dopo l'eventuale soluzione, l'host sceglie **Mostra classifica**
+o **Prossima domanda**. La classifica non viene pubblicata né mostrata automaticamente.
+Nell'ultima domanda il secondo pulsante diventa **Mostra risultati finali**.
+La domanda successiva entra direttamente in preview, o nella fase di risposta se
+la lettura dura zero secondi. `NEXT_QUESTION` resta supportato per gli stati salvati
+con le versioni precedenti. I comandi includono la revisione corrente: doppio clic,
+scelte concorrenti e schede obsolete non possono avanzare due domande.
 
 | Regola | Valore |
 | --- | --- |
@@ -361,14 +372,27 @@ La preview e la fase di risposta terminano automaticamente secondo le scadenze d
 | Opzioni per domanda | Da 2 a 8 |
 | Tempo lettura | Da 0 a 300 secondi |
 | Tempo risposta | Da 1 a 600 secondi |
-| Punti risposta corretta | Da 0 a 100.000 |
+| Punti risposta corretta | Da 1 a 100, in base al tempo di risposta |
 | Punti risposta errata | Da −100.000 a 0 |
 | Mancata risposta | 0 punti |
 | Nickname | Da 1 a 32 caratteri, univoco nella partita senza distinzione tra maiuscole e minuscole |
 | Nuovi ingressi | Solo durante la lobby |
 | Riconnessioni | Anche dopo l’avvio, con credenziali della sessione originale |
 
-Ogni giocatore può scegliere **una sola opzione per domanda**, anche se l’autore ha segnato più opzioni come corrette. Non è previsto un bonus velocità: il tempo di risposta viene registrato, ma i punti sono quelli configurati nel quiz.
+Ogni giocatore può scegliere **una sola opzione per domanda**, anche se l’autore ha segnato più opzioni come corrette. Per le risposte corrette il motore usa `P = max(1, round(100 * (1 - t / T)))`,
+con `T = answer_seconds * 1000` e `t` limitato tra zero e `T`. La formula è
+centralizzata in `socket-server/lib/scoring.js` e applicata quando il server accetta
+l'invio. Il timestamp di ricezione viene acquisito prima delle code e della
+persistenza: un'elaborazione lenta non penalizza una risposta già ricevuta.
+Gli invii ricevuti alla scadenza o dopo sono rifiutati, come nelle regole precedenti;
+una risposta subito prima della scadenza può valere 1 punto. Non viene compensata
+la latenza di rete precedente alla ricezione server.
+
+`correct_points` resta nel formato dei quiz per compatibilità con database e quiz
+esistenti; il nuovo motore usa sempre la scala temporale 1–100. Le penalità
+`wrong_points` restano invariate e una mancata risposta vale zero. I punteggi di
+invii già persistiti non vengono ricalcolati. Il totale viene sommato una sola
+volta alla chiusura della domanda e archiviato con il meccanismo RPC esistente.
 
 A parità di punti il rango è condiviso, per esempio `1, 1, 3`. Le percentuali delle opzioni sono calcolate sul numero di invii ricevuti. Un giocatore espulso scompare dalla classifica, ma gli invii già effettuati rimangono nello storico.
 

@@ -129,8 +129,9 @@ export default function QuizEditorPage() {
           <button disabled={active.answers.length >= 8} className="text-purple-700 disabled:opacity-40" onClick={() => update(active.id, { answers: [...active.answers, { id: crypto.randomUUID(), answer_text: '', is_correct: false }] })}>+ Aggiungi risposta</button>
           <div className="grid grid-cols-2 gap-4">{([
             ['preview_seconds', 'Tempo lettura (secondi)', 0, 300], ['answer_seconds', 'Tempo risposta (secondi)', 1, 600],
-            ['correct_points', 'Punti risposta corretta', 0, 100000], ['wrong_points', 'Punti risposta errata', -100000, 0],
+            ['wrong_points', 'Punti risposta errata', -100000, 0],
           ] as const).map(([key, label, min, max]) => <label key={key}>{label}<input type="number" className="field" min={min} max={max} value={Number.isNaN(active[key]) ? '' : active[key]} onChange={e => update(active.id, { [key]: e.target.valueAsNumber })} /></label>)}</div>
+          <p className="text-sm text-gray-500">Ogni risposta corretta vale da 1 a 100 punti: più velocemente rispondi, più punti ottieni. Le risposte errate mantengono la penalità impostata.</p>
         </section> : <p>Aggiungi una domanda per iniziare.</p>}
       </div>
     </fieldset>

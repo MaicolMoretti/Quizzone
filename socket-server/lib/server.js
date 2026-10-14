@@ -53,21 +53,25 @@ async function createGameServer({ store, repository, origins = ['http://localhos
     // Wrapper comune: limite di 30 eventi/secondo, coda per socket, payload e ack.
     // La coda impedisce che join e comandi dello stesso client si superino a vicenda.
     const event = (name, action) => socket.on(name, (payload, ack) => {
+      const receivedAt = now();
       const reply = value => { if (typeof ack === 'function') ack(value); else if (!value.ok) socket.emit('game:error', value.error); };
       if (now() - windowStart >= 1000) { windowStart = now(); requests = 0; }
       if (++requests > 30) { reply({ ok: false, error: { code: 'RATE_LIMIT', message: 'Troppe richieste.' } }); return; }
-      queue = queue.then(async () => {
+      const run = async () => {
         try {
           if (!healthy || closing) throw new GameError('UNAVAILABLE', 'Server temporaneamente non disponibile.');
           if (!socket.connected) return;
           if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new GameError('INVALID_PAYLOAD', 'Dati non validi.');
-          const data = await action(payload);
+          const data = await action(payload, receivedAt);
           reply({ ok: true, data: data || {} });
         } catch (error) {
           if (!(error instanceof GameError)) logger.error('Operazione Game Engine fallita:', error.message);
           reply({ ok: false, error: { code: error instanceof GameError ? error.code : 'INTERNAL_ERROR', message: error instanceof GameError ? error.message : 'Operazione non riuscita. Riprova.' } });
         }
-      });
+      };
+      // Prenota subito il posto nella coda della partita: timer e persistenza
+      // successivi non possono rendere tardiva una risposta già ricevuta.
+      queue = name === 'player:answer' ? run() : queue.then(run);
       track(queue);
     });
     const unused = () => {
@@ -128,9 +132,9 @@ async function createGameServer({ store, repository, origins = ['http://localhos
       }
       return { playerId, answerId, state: await bind(gameCode, 'player', playerId) };
     });
-    event('player:answer', async ({ questionId, answerId }) => {
+    event('player:answer', async ({ questionId, answerId }, receivedAt) => {
       const code = requireRole('player');
-      return engine.answer(code, socket.data.playerId, socket.id, questionId, answerId);
+      return engine.answer(code, socket.data.playerId, socket.id, questionId, answerId, receivedAt);
     });
     // Lo stato è pubblico; answerId è aggiunto soltanto per il giocatore richiedente.
     event('game:sync', async () => {
@@ -139,7 +143,7 @@ async function createGameServer({ store, repository, origins = ['http://localhos
       const answer = socket.data.role === 'player' ? game.submissions.find(a => a.player_id === socket.data.playerId && a.question_id === game.questions[game.currentQuestionIndex]?.id) : null;
       return { state: snapshot(game, now()), answerId: answer?.answer_id || null };
     });
-    for (const [name, command] of Object.entries({ 'admin:start_game': 'start', 'admin:next_state': 'next', 'admin:kick_player': 'kick', 'admin:end_game': 'end' })) {
+    for (const [name, command] of Object.entries({ 'admin:start_game': 'start', 'admin:next_state': 'next', 'admin:show_leaderboard': 'show_leaderboard', 'admin:next_question': 'next_question', 'admin:kick_player': 'kick', 'admin:end_game': 'end' })) {
       event(name, async ({ revision, playerId }) => {
         const code = requireRole('admin');
         const result = await engine.command(code, await user(), command, revision, playerId);

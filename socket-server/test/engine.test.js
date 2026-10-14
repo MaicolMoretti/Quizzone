@@ -35,10 +35,10 @@ test('Partita completa con due domande: punteggi, percentuali, parità e archivi
     await f.command();
     assert.equal(f.engine.get(f.code).status, 'LEADERBOARD');
     await f.command();
-    if (!i) { assert.equal(f.engine.get(f.code).status, 'NEXT_QUESTION'); await f.engine.tick(); }
+    if (!i) { assert.equal(f.engine.get(f.code).status, 'QUESTION_PREVIEW'); }
   }
   assert.equal(f.engine.get(f.code).status, 'FINAL_RESULTS');
-  assert.deepEqual(snapshot(f.engine.get(f.code)).leaderboard.map(p => [p.score, p.rank]), [[80,1],[80,1]]);
+  assert.deepEqual(snapshot(f.engine.get(f.code)).leaderboard.map(p => [p.score, p.rank]), [[75,1],[75,1]]);
   await f.command();
   assert.equal(f.engine.get(f.code).status, 'ENDED');
   assert.equal(f.repo.archived[0].submissions.length, 4);
@@ -72,7 +72,7 @@ test('Invii duplicati e obsoleti non alterano i punti; le scadenze valgono anche
   assert.equal(results[0].status, 'fulfilled');
   assert.equal(results[1].reason.code, 'ALREADY_ANSWERED');
   f.advance(5000);
-  await rejects(f.engine.answer(f.code, p.playerId, 's', q.id, q.answers[0].id), 'ANSWERS_CLOSED');
+  await rejects(f.engine.answer(f.code, p.playerId, 's', q.id, q.answers[0].id), 'ALREADY_ANSWERED');
   await f.engine.tick(); await f.engine.tick();
   assert.equal(f.engine.get(f.code).players[0].score, 100);
 });

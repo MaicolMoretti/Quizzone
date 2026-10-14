@@ -15,8 +15,8 @@ import { useGame } from '@/lib/game/use-game';
 import type { GameRole, Phase } from '@/lib/game/types';
 
 // Etichette di visualizzazione: i valori Phase restano gli identificativi del protocollo.
-const labels: Record<Phase, string> = { LOBBY: 'Aspettiamo i giocatori', QUESTION_PREVIEW: 'Leggi la domanda', QUESTION_ACTIVE: 'Scegli la tua risposta', QUESTION_LOCKED: 'Tempo scaduto · risposte chiuse', ANSWER_REVEAL: 'La risposta corretta', LEADERBOARD: 'Classifica', NEXT_QUESTION: 'Preparati alla prossima domanda', FINAL_RESULTS: 'Il podio finale', ENDED: 'Partita conclusa' };
-const nextLabels: Partial<Record<Phase, string>> = { QUESTION_PREVIEW: 'Mostra le risposte', QUESTION_ACTIVE: 'Chiudi le risposte', QUESTION_LOCKED: 'Rivela la soluzione', ANSWER_REVEAL: 'Mostra la classifica', LEADERBOARD: 'Prosegui', FINAL_RESULTS: 'Concludi e archivia' };
+const labels: Record<Phase, string> = { LOBBY: 'Aspettiamo i giocatori', QUESTION_PREVIEW: 'Leggi la domanda', QUESTION_ACTIVE: 'Scegli la tua risposta', QUESTION_LOCKED: 'Risposte concluse', ANSWER_REVEAL: 'La risposta corretta', LEADERBOARD: 'Classifica', NEXT_QUESTION: 'Preparati alla prossima domanda', FINAL_RESULTS: 'Il podio finale', ENDED: 'Partita conclusa' };
+const nextLabels: Partial<Record<Phase, string>> = { QUESTION_PREVIEW: 'Mostra le risposte', QUESTION_ACTIVE: 'Chiudi le risposte', QUESTION_LOCKED: 'Rivela la soluzione', FINAL_RESULTS: 'Concludi e archivia' };
 const colors = ['bg-rose-600', 'bg-blue-600', 'bg-amber-600', 'bg-emerald-600'];
 
 export default function GameRoom({ role, identifier }: { role: GameRole; identifier: string }) {
@@ -30,7 +30,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
   const ranking = state && ['LEADERBOARD', 'FINAL_RESULTS', 'ENDED'].includes(state.status);
   const revealed = state?.question?.answers?.some(a => typeof a.is_correct === 'boolean');
   const selected = state?.question?.answers?.find(a => a.id === game.selectedAnswer);
-  const ownRank = state?.leaderboard?.find(p => p.id === game.playerId);
+  const hostDecision = state && ['QUESTION_LOCKED', 'ANSWER_REVEAL'].includes(state.status);
   // In rete locale l’URL configurato evita QR con localhost, irraggiungibile dal telefono.
   const playUrl = state && typeof window !== 'undefined' ? `${(process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '')}/play/${state.gameCode}` : '';
 
@@ -76,7 +76,6 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
             {revealed && <span className="mt-2 block text-sm">{state.statistics?.find(s => s.answerId === a.id)?.percentage || 0}% delle risposte</span>}
           </button>)}</div>
           <p role="status" className="text-center text-purple-200">{isPlayer ? revealed ? selected ? selected.is_correct ? 'Risposta corretta!' : 'Risposta errata.' : 'Non hai risposto a questa domanda.' : game.selectedAnswer ? 'Risposta inviata. Attendi la soluzione.' : state.status === 'QUESTION_PREVIEW' ? 'Le opzioni appariranno tra poco.' : state.status === 'QUESTION_LOCKED' ? 'Attendi la soluzione.' : 'Puoi scegliere una sola risposta.' : `${state.totalAnswers} risposte ricevute su ${state.playersCount} partecipanti`}</p>
-          {isPlayer && revealed && ownRank && <p className="text-center text-xl font-bold">Il tuo punteggio: {ownRank.score} · Posizione {ownRank.rank}</p>}
         </section>}
         {/* Il testo può andare a capo anche per nickname lunghi su schermi stretti. */}
         {ranking && <section className="mx-auto max-w-3xl space-y-3">
@@ -87,10 +86,13 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
         </section>}
         {/* I comandi portano la revisione corrente; il server verifica nuovamente ruolo e identità. */}
         {isAdmin && <section className="mt-10 space-y-5 rounded-2xl border border-white/20 p-5">
+          {hostDecision && <p>Risposte concluse e punteggi assegnati. Scegli se mostrare la classifica o proseguire direttamente.</p>}
           <div className="flex flex-wrap gap-4">
             {/* In lobby il QR è riservato a conduttore/proiettore; il giocatore vede la conferma. */}
         {state.status === 'LOBBY' && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:start_game')}>Inizia il quiz</button>}
             {nextLabels[state.status] && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:next_state')}>{nextLabels[state.status]}</button>}
+            {hostDecision && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:show_leaderboard')}>Mostra classifica</button>}
+            {(hostDecision || state.status === 'LEADERBOARD') && <button className="rounded-xl border border-purple-300 px-5 py-3 font-bold disabled:opacity-40" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:next_question')}>{state.currentQuestionIndex + 1 < state.totalQuestions ? 'Prossima domanda' : 'Mostra risultati finali'}</button>}
             <Link className="rounded-xl bg-white/10 px-5 py-3" target="_blank" href={`/game/${state.gameId}/presentation`}>Apri proiettore ↗</Link>
             {state.status !== 'ENDED' && <button disabled={!connected || !joined || busy} className="px-5 py-3 text-rose-300 disabled:opacity-40" onClick={() => { if (window.confirm('Concludere ora la partita e archiviare i risultati?')) void game.command('admin:end_game'); }}>Termina partita</button>}
           </div>

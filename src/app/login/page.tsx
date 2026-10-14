@@ -11,6 +11,9 @@ import { Loader2 } from "lucide-react";
  * Pagina di Login per l'interfaccia Admin.
  * Permette ai creatori di quiz di accedere al proprio pannello di controllo.
  * Utilizza Supabase Auth per l'autenticazione tramite Email e Password. 
+ * 
+ * 
+ *  
  */
 export default function LoginPage() {
   // Stato per i campi del form
@@ -33,19 +36,25 @@ export default function LoginPage() {
     setLoading(true);   // Attiva lo stato di caricamento (mostra spinner)
     setError(null);     // Resetta eventuali errori precedenti
 
-    // Chiamata all'API di autenticazione di Supabase
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      // Chiamata all'API di autenticazione di Supabase
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      // Se c'è un errore (es. credenziali errate), mostralo a schermo
-      setError(error.message);
+      if (error) {
+        // Se c'è un errore (es. credenziali errate), mostralo a schermo
+        setError(error.message);
+        setLoading(false);
+      } else {
+        // Login riuscito! Reindirizza l'utente alla dashboard privata
+        router.push("/dashboard");
+      }
+    } catch {
+      setError("Impossibile contattare il server di Quizzone. Controlla la connessione e riprova.");
+    } finally {
       setLoading(false);
-    } else {
-      // Login riuscito! Reindirizza l'utente alla dashboard privata
-      router.push("/dashboard");
     }
   };
 

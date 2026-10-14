@@ -55,6 +55,8 @@ riconnettere il socket con il nuovo token e inviare nuovamente `admin:join`.
 | `player:answer` | `{ questionId, answerId }` | `{ answerId }` |
 | `admin:start_game` | `{ revision }` | `{ state }` |
 | `admin:next_state` | `{ revision }` | `{ state }` |
+| `admin:show_leaderboard` | `{ revision }` | `{ state }`, da risposte chiuse o soluzione |
+| `admin:next_question` | `{ revision }` | `{ state }`, da risposte chiuse, soluzione o classifica |
 | `admin:kick_player` | `{ revision, playerId }` | `{ state }` |
 | `admin:end_game` | `{ revision }` | `{ state }` |
 | `game:sync` | `{}` | `{ state, answerId }` (risposta personale, se player) |
@@ -62,8 +64,8 @@ riconnettere il socket con il nuovo token e inviare nuovamente `admin:join`.
 `gameCode` è una stringa. La `revision` deve essere quella dell'ultimo stato
 ricevuto: evita che doppi clic, richieste ripetute o schede obsolete saltino fasi.
 Se arriva `STALE_STATE`, usare `game:sync` e lasciare che il conduttore confermi
-nuovamente l'azione. Le vecchie bozze di eventi `admin:start_question`,
-`admin:show_answer` e `admin:show_leaderboard` sono sostituite da `admin:next_state`.
+nuovamente l'azione. `admin:next_state` resta compatibile con il flusso precedente;
+l'interfaccia usa comandi espliciti per mostrare o saltare la classifica.
 
 | Evento server → client | Contenuto |
 | --- | --- |
@@ -111,20 +113,37 @@ e restituisce anche l'eventuale risposta già inviata alla domanda corrente.
 
 ```text
 LOBBY --start--> QUESTION_PREVIEW --timer/next--> QUESTION_ACTIVE
-  --timer/next--> QUESTION_LOCKED --next--> ANSWER_REVEAL
-  --next--> LEADERBOARD --next--> NEXT_QUESTION --> QUESTION_PREVIEW
-                       \--ultima domanda/next--> FINAL_RESULTS --next--> ENDED
+  --tutti hanno risposto/timer/next--> QUESTION_LOCKED
+  QUESTION_LOCKED --next--> ANSWER_REVEAL (soluzione facoltativa)
+  QUESTION_LOCKED o ANSWER_REVEAL --show_leaderboard--> LEADERBOARD
+  QUESTION_LOCKED o ANSWER_REVEAL o LEADERBOARD --next_question-->
+    QUESTION_PREVIEW (direttamente ACTIVE se preview=0), oppure FINAL_RESULTS
+  FINAL_RESULTS --next--> ENDED
 ```
+
+La classifica appare solo su scelta esplicita dell'host e nelle fasi finali.
+`NEXT_QUESTION` resta leggibile per recuperare gli stati persistiti precedenti.
 
 - Il timer usa scadenze assolute del server. Tick ogni secondo circa; le risposte
   vengono rifiutate alla scadenza anche se il callback del timer è in ritardo.
 - I tempi provengono dal quiz: preview 0–300 s, risposta 1–600 s. L'admin può saltare
   la preview o chiudere prima; il client non sceglie la durata né il tempo risposta.
-- Un solo invio per giocatore/domanda. Il punteggio è fisso: `correct_points` per
-  risposta corretta, `wrong_points` (zero o negativo) per risposta errata, zero per
-  mancata risposta. Non è previsto un bonus legato alla velocità.
-- Il server calcola i punti una sola volta alla chiusura. Le opzioni possono avere
-  più risposte corrette, ma ogni giocatore ne seleziona una.
+- Un solo invio per giocatore/domanda, anche dopo riconnessione. Per una risposta
+  corretta `timeScore(t, T)` in `lib/scoring.js` applica
+  `max(1, round(100 * (1 - clamp(t, 0, T) / T)))`, con `T = answer_seconds * 1000`.
+  `wrong_points` (zero o negativo) e lo zero per mancata risposta restano invariati.
+  Il campo legacy `correct_points` è conservato nel formato, ma non usato nel calcolo.
+- Il listener acquisisce il timestamp server alla ricezione e accoda subito l'invio
+  nella coda della partita, prima che un tick successivo possa chiudere la domanda.
+  La validità e il punteggio usano quell'istante anche se lo store risponde tardi.
+  La scadenza resta esclusiva: invii ricevuti a `deadline` o dopo sono rifiutati.
+  Non ci si fida di punti o timestamp nel payload e non si compensa la latenza client.
+- Il server memorizza i punti validati nell'invio, poi li somma una sola volta alla
+  chiusura. Mostrare o saltare la classifica non ricalcola nulla. Le opzioni possono
+  avere più risposte corrette, ma ogni giocatore ne seleziona una.
+- I giocatori disconnessi restano attesi fino alla scadenza; gli espulsi sono esclusi
+  dal controllo di completamento. Soluzione e statistiche restano facoltative;
+  classifica e punteggi pubblici sono presenti solo in LEADERBOARD e nelle fasi finali.
 - Nuovi giocatori solo in lobby, nickname unici senza distinzione maiuscole/minuscole.
   Riconnessione consentita anche dopo l'avvio. Chi viene espulso non può recuperare
   quella sessione; i suoi invii restano nello storico, ma scompare dalla classifica.

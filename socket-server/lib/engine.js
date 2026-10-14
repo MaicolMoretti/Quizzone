@@ -5,6 +5,7 @@
  * e pubblicazione sono iniettati per verificare le regole senza rete reale.
  */
 const { randomUUID, randomBytes, randomInt, createHash } = require('node:crypto');
+const { timeScore } = require('./scoring');
 
 class GameError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -77,8 +78,8 @@ function snapshot(game, now = Date.now()) {
       });
     }
   }
-  // Durante QUESTION_LOCKED i nuovi punteggi devono restare nascosti fino alla soluzione.
-  if (reveal) state.leaderboard = leaderboard(game);
+  // La soluzione non implica la pubblicazione della classifica: decide l'host.
+  if (['LEADERBOARD', 'FINAL_RESULTS', 'ENDED'].includes(game.status)) state.leaderboard = leaderboard(game);
   if (game.endReason) state.endReason = game.endReason;
   return state;
 }
@@ -137,7 +138,7 @@ class GameEngine {
    * Lavora su una copia privata sotto la coda della partita. Applica prima
    * scadenza e timer, poi il comando: evita risposte tardive e aggiornamenti persi.
    */
-  mutate(code, action) {
+  mutate(code, action, receivedAt = this.now()) {
     return this.serial(code, async () => {
       const game = structuredClone(this.get(code));
       if (game.expiresAt <= this.now() && game.status !== 'ENDED') {
@@ -145,8 +146,8 @@ class GameEngine {
         await this.save(game);
         fail('GAME_ENDED', 'Partita scaduta.');
       }
-      // La scadenza server decide la validità dell’invio, anche se il timer periodico è in ritardo.
-      if (this.advanceTimers(game)) await this.save(game);
+      // Usa l'istante di ricezione, anche quando l'operazione attende lo store.
+      if (this.advanceTimers(game, receivedAt)) await this.save(game);
       const result = await action(game);
       await this.save(game);
       return result;
@@ -240,22 +241,23 @@ class GameEngine {
    * Accetta un solo invio per giocatore e domanda attiva. Correttezza, punti
    * e tempo impiegato sono calcolati sul server, mai accettati dal client.
    */
-  answer(code, playerId, socketId, questionId, answerId) {
+  answer(code, playerId, socketId, questionId, answerId, receivedAt = this.now()) {
     return this.mutate(code, game => {
       const p = game.players.find(p => p.id === playerId && p.socketId === socketId && !p.kicked);
       if (!p) fail('INVALID_SESSION', 'Entra nella partita prima di rispondere.');
-      if (game.status !== 'QUESTION_ACTIVE') fail('ANSWERS_CLOSED', 'Le risposte sono chiuse.');
+      if (game.submissions.some(s => s.player_id === p.id && s.question_id === questionId)) fail('ALREADY_ANSWERED', 'Hai già risposto.');
+      if (game.status !== 'QUESTION_ACTIVE' || receivedAt < game.activeStartedAt) fail('ANSWERS_CLOSED', 'Le risposte sono chiuse.');
       const q = game.questions[game.currentQuestionIndex];
       if (q.id !== questionId) fail('INVALID_QUESTION', 'La domanda non è quella attiva.');
       const a = q.answers.find(a => a.id === answerId);
       if (!a) fail('INVALID_ANSWER', 'Risposta non valida.');
-      if (game.submissions.some(s => s.player_id === p.id && s.question_id === q.id)) fail('ALREADY_ANSWERED', 'Hai già risposto.');
       game.submissions.push({ id: randomUUID(), game_id: game.id, player_id: p.id, question_id: q.id, answer_id: a.id,
-        is_correct: a.is_correct, points_awarded: a.is_correct ? q.correct_points : q.wrong_points,
-        response_time: Math.max(0, this.now() - game.activeStartedAt), created_at: new Date(this.now()).toISOString() });
-      p.lastSeenAt = this.now();
+        is_correct: a.is_correct, points_awarded: a.is_correct ? timeScore(receivedAt - game.activeStartedAt, q.answer_seconds * 1000) : q.wrong_points,
+        response_time: Math.max(0, receivedAt - game.activeStartedAt), created_at: new Date(receivedAt).toISOString() });
+      p.lastSeenAt = receivedAt;
+      this.lockIfComplete(game);
       return { answerId };
-    });
+    }, receivedAt);
   }
 
   /**
@@ -282,6 +284,7 @@ class GameEngine {
    * QUESTION_ACTIVE. Le chiamate successive ai timer non ripetono il conteggio.
    */
   lock(game) {
+    if (game.status !== 'QUESTION_ACTIVE') return;
     game.status = 'QUESTION_LOCKED';
     game.deadline = null;
     const questionId = game.questions[game.currentQuestionIndex].id;
@@ -291,17 +294,35 @@ class GameEngine {
     }
   }
 
+  lockIfComplete(game) {
+    if (game.status !== 'QUESTION_ACTIVE') return;
+    const players = game.players.filter(p => !p.kicked);
+    const questionId = game.questions[game.currentQuestionIndex].id;
+    const answered = new Set(game.submissions.filter(a => a.question_id === questionId).map(a => a.player_id));
+    if (players.length && players.every(p => answered.has(p.id))) this.lock(game);
+  }
+
+  nextQuestion(game) {
+    if (game.currentQuestionIndex + 1 >= game.questions.length) {
+      game.status = 'FINAL_RESULTS';
+      game.deadline = null;
+    } else {
+      this.preview(game, this.now());
+      this.advanceTimers(game);
+    }
+  }
+
   /**
    * Recupera in sequenza le transizioni scadute. L’attivazione usa la scadenza
    * della preview, non l’ora del controllo, così un ritardo non allunga il quiz.
    */
-  advanceTimers(game) {
+  advanceTimers(game, time = this.now()) {
     let changed = false;
-    if (game.status === 'NEXT_QUESTION') { this.preview(game, this.now()); changed = true; }
-    if (game.status === 'QUESTION_PREVIEW' && game.deadline <= this.now()) {
+    if (game.status === 'NEXT_QUESTION') { this.preview(game, time); changed = true; }
+    if (game.status === 'QUESTION_PREVIEW' && game.deadline <= time) {
       this.activate(game, game.deadline); changed = true;
     }
-    if (game.status === 'QUESTION_ACTIVE' && game.deadline <= this.now()) {
+    if (game.status === 'QUESTION_ACTIVE' && game.deadline <= time) {
       this.lock(game); changed = true;
     }
     return changed;
@@ -339,6 +360,7 @@ class GameEngine {
         p.kicked = true;
         const socketId = p.socketId;
         p.socketId = null;
+        this.lockIfComplete(game);
         return { kickedSocketId: socketId };
       }
       if (command === 'end') { await this.end(game); return; }
@@ -349,13 +371,19 @@ class GameEngine {
         this.preview(game, this.now());
         return;
       }
+      if (command === 'show_leaderboard' || command === 'next_question') {
+        if (!['QUESTION_LOCKED', 'ANSWER_REVEAL', ...(command === 'next_question' ? ['LEADERBOARD'] : [])].includes(game.status)) fail('INVALID_STATE', 'Transizione non consentita.');
+        if (command === 'show_leaderboard') game.status = 'LEADERBOARD';
+        else this.nextQuestion(game);
+        return;
+      }
       if (command !== 'next') fail('INVALID_COMMAND', 'Comando non valido.');
       switch (game.status) {
         case 'QUESTION_PREVIEW': this.activate(game, this.now()); break;
         case 'QUESTION_ACTIVE': this.lock(game); break;
         case 'QUESTION_LOCKED': game.status = 'ANSWER_REVEAL'; break;
         case 'ANSWER_REVEAL': game.status = 'LEADERBOARD'; break;
-        case 'LEADERBOARD': game.status = game.currentQuestionIndex + 1 < game.questions.length ? 'NEXT_QUESTION' : 'FINAL_RESULTS'; break;
+        case 'LEADERBOARD': this.nextQuestion(game); break;
         case 'FINAL_RESULTS': await this.end(game); break;
         default: fail('INVALID_STATE', 'Transizione non consentita.');
       }

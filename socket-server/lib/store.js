@@ -35,9 +35,16 @@ class RedisStore {
    * il possesso, avvisa il server e interrompe i rinnovi: serve un riavvio.
    */
   async connect(onLeaseLost = () => {}) {
-    try { await this.redis.connect(); } catch (error) { this.redis.disconnect(); throw error; }
-    if (await this.redis.set(this.leaseKey, this.token, 'PX', 30000, 'NX') !== 'OK') {
-      await this.redis.quit();
+    let lease;
+    try {
+      await this.redis.connect();
+      lease = await this.redis.set(this.leaseKey, this.token, 'PX', 30000, 'NX');
+    } catch {
+      this.redis.disconnect();
+      throw new Error('Redis non raggiungibile. Avvia Redis (con Docker: docker start quizzone-redis) e verifica REDIS_URL in socket-server/.env. Il Game Engine non è stato avviato.');
+    }
+    if (lease !== 'OK') {
+      this.redis.disconnect();
       throw new Error('Un altro Game Engine gestisce già questo namespace Redis.');
     }
     this.ready = true;

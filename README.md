@@ -4,7 +4,7 @@ Quizzone è una web app per creare e condurre quiz multiplayer in tempo reale. I
 
 Il progetto comprende l’editor dei quiz, l’area organizzatori, le tre schermate di gioco e un Game Engine personalizzato che gestisce tempi, risposte, punteggi e archiviazione.
 
-## Nota sulla creazione dei quiz
+## Nota sulla creazione dei quiz.
 
 La creazione di un quiz passa dalla route server `POST /api/quizzes`. La pagina
 del form non inserisce direttamente dati in Supabase: invia titolo e descrizione

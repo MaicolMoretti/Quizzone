@@ -1,3 +1,7 @@
+/**
+ * Verifica la formula del punteggio su tempi rappresentativi e durate diverse.
+ * Controlla inoltre limiti, monotonia e rifiuto dei parametri non validi.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { timeScore } = require('../lib/scoring');

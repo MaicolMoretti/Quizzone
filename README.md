@@ -343,6 +343,29 @@ Le partite aperte compaiono nella dashboard del loro creatore. Ricaricare la pag
 | `/game/[gameId]/presentation` | Proiettore |
 | `/play/[gameCode]` | Giocatore |
 
+## Domande con traccia audio
+
+Nell’editor puoi aggiungere **URL traccia audio (opzionale)**, ad esempio per una
+domanda «Qual è il titolo della canzone?». Usa un link diretto HTTP/HTTPS a un file
+accessibile ai partecipanti (MP3, WAV o altro formato supportato dai loro browser),
+non un collegamento a una pagina Spotify o YouTube. Per un’app pubblicata in HTTPS,
+usa anche una traccia in HTTPS. Il file resta ospitato all’URL indicato: non viene
+caricato dal computer su Quizzone.
+
+L’editor permette di ascoltare l’anteprima prima di salvare. Durante la domanda il
+lettore compare su host, proiettore e giocatori, dalla fase di lettura fino alla
+soluzione. La riproduzione è manuale e indipendente per ciascun dispositivo;
+per un ascolto collettivo l’host può avviarla sul proiettore. Il cambio di domanda
+o l’apertura della classifica interrompono il lettore precedente. Un link non
+raggiungibile mostra un errore senza bloccare le risposte. Il lettore non sospende
+i timer: imposta tempi di lettura e risposta adatti alla durata della traccia.
+
+**Database già installato:** riapplica l’intero [database/editor.sql](database/editor.sql)
+nel SQL Editor Supabase prima di utilizzare questa versione. La migrazione aggiunge
+`questions.audio_url`, aggiorna la RPC `save_quiz` e ricarica lo schema REST senza
+cancellare i quiz. Per una nuova installazione il campo è già incluso in `setup.sql`.
+I quiz e gli snapshot precedenti senza traccia continuano a funzionare.
+
 ## Regole, timer e punteggi
 
 ```text

@@ -1,3 +1,7 @@
+/**
+ * Verifica da viste mobile le scelte del conduttore, la sincronizzazione degli
+ * stati e la conservazione dei punteggi durante la partita.
+ */
 import { test, expect, devices } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { io } from 'socket.io-client';
@@ -43,7 +47,7 @@ test('Host mobile: salta la prima classifica, mostra la seconda, conserva punti 
       await expect(player.getByRole('button', { name: 'Mostra classifica', exact: true })).toHaveCount(0);
       await expect(screen.getByRole('button', { name: 'Mostra classifica', exact: true })).toHaveCount(0);
       if (i === 1) {
-        // Due click nello stesso task del browser: il busyRef deve bloccare il secondo.
+        // Due clic nello stesso ciclo del browser verificano il blocco del secondo comando.
         await host.getByRole('button', { name: 'Prossima domanda', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
         for (const page of [host, player, screen]) {
           await expect(page.getByRole('heading', { name: 'Scelta domanda 2' })).toBeVisible();

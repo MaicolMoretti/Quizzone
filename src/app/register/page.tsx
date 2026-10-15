@@ -139,7 +139,7 @@ export default function RegisterPage() {
               />
             </div>
 
-            {/* Display banner Errore animato */}
+            {/* Mostra il messaggio di errore con un'animazione d'ingresso. */}
             {error && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}

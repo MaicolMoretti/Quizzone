@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { QRCodeSVG } from 'qrcode.react';
 import { useGame } from '@/lib/game/use-game';
 import type { GameRole, Phase } from '@/lib/game/types';
+import QuestionAudio from '@/components/question-audio';
 
 // Etichette di visualizzazione: i valori Phase restano gli identificativi del protocollo.
 const labels: Record<Phase, string> = { LOBBY: 'Aspettiamo i giocatori', QUESTION_PREVIEW: 'Leggi la domanda', QUESTION_ACTIVE: 'Scegli la tua risposta', QUESTION_LOCKED: 'Risposte concluse', ANSWER_REVEAL: 'La risposta corretta', LEADERBOARD: 'Classifica', NEXT_QUESTION: 'Preparati alla prossima domanda', FINAL_RESULTS: 'Il podio finale', ENDED: 'Partita conclusa' };
@@ -67,6 +68,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
         {/* Le opzioni e la correttezza arrivano dal server solo nelle fasi consentite. */}
         {state.question && !ranking && state.status !== 'NEXT_QUESTION' && <section className="space-y-6">
           <h2 className="break-words text-center text-2xl font-bold sm:text-4xl">{state.question.question_text}</h2>
+          {state.question.audio_url && <QuestionAudio key={`${state.question.id}:${state.question.audio_url}`} src={state.question.audio_url} />}
           {state.question.image_url && /^https?:\/\//i.test(state.question.image_url) && <img src={state.question.image_url} alt="Immagine della domanda" className="mx-auto max-h-72 rounded-2xl object-contain" />}
           <div className="grid gap-4 sm:grid-cols-2">{state.question.answers?.map((a, i) => <button key={a.id}
             disabled={!isPlayer || !joined || !connected || busy || state.status !== 'QUESTION_ACTIVE' || !!game.selectedAnswer || state.timer === 0}
@@ -88,7 +90,7 @@ export default function GameRoom({ role, identifier }: { role: GameRole; identif
         {isAdmin && <section className="mt-10 space-y-5 rounded-2xl border border-white/20 p-5">
           {hostDecision && <p>Risposte concluse e punteggi assegnati. Scegli se mostrare la classifica o proseguire direttamente.</p>}
           <div className="flex flex-wrap gap-4">
-            {/* In lobby il QR è riservato a conduttore/proiettore; il giocatore vede la conferma. */}
+            {/* L'avvio è disponibile solo in lobby; gli altri comandi dipendono dalla fase. */}
         {state.status === 'LOBBY' && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:start_game')}>Inizia il quiz</button>}
             {nextLabels[state.status] && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:next_state')}>{nextLabels[state.status]}</button>}
             {hostDecision && <button className="action" disabled={!connected || !joined || busy} onClick={() => void game.command('admin:show_leaderboard')}>Mostra classifica</button>}

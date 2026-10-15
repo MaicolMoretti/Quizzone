@@ -26,6 +26,12 @@ function validateQuiz(quiz) {
   }
   const ids = new Set();
   for (const q of quiz.questions) {
+    if (q.audio_url != null && q.audio_url !== '') {
+      try {
+        const url = new URL(q.audio_url);
+        if (typeof q.audio_url !== 'string' || q.audio_url.length > 2048 || !['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error();
+      } catch { fail('INVALID_QUIZ', 'URL della traccia audio non valido. Usa un link http o https.'); }
+    }
     if (!uuid(q.id) || ids.has(q.id) || typeof q.question_text !== 'string' || !q.question_text.trim() ||
         !integer(q.preview_seconds, 0, 300) || !integer(q.answer_seconds, 1, 600) ||
         !integer(q.correct_points, 0, 100000) || !integer(q.wrong_points, -100000, 0) ||
@@ -66,7 +72,7 @@ function snapshot(game, now = Date.now()) {
     totalAnswers: q ? game.submissions.filter(a => a.question_id === q.id).length : 0,
   };
   if (q) {
-    state.question = { id: q.id, question_text: q.question_text, image_url: q.image_url || null };
+    state.question = { id: q.id, question_text: q.question_text, image_url: q.image_url || null, audio_url: q.audio_url || null };
     if (game.status !== 'QUESTION_PREVIEW') {
       state.question.answers = q.answers.map(a => ({ id: a.id, answer_text: a.answer_text, ...(reveal ? { is_correct: a.is_correct } : {}) }));
     }
@@ -294,6 +300,7 @@ class GameEngine {
     }
   }
 
+  /** Chiude la domanda quando tutti i giocatori ancora validi hanno risposto. */
   lockIfComplete(game) {
     if (game.status !== 'QUESTION_ACTIVE') return;
     const players = game.players.filter(p => !p.kicked);
@@ -302,6 +309,7 @@ class GameEngine {
     if (players.length && players.every(p => answered.has(p.id))) this.lock(game);
   }
 
+  /** Avanza all’anteprima successiva oppure passa ai risultati finali. */
   nextQuestion(game) {
     if (game.currentQuestionIndex + 1 >= game.questions.length) {
       game.status = 'FINAL_RESULTS';

@@ -1,3 +1,7 @@
+/**
+ * Verifica il percorso di errore quando Redis chiude la connessione.
+ * Il client deve essere rilasciato e lo store non deve risultare pronto.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');

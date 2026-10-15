@@ -59,7 +59,7 @@ class SupabaseRepository {
       const collaborators = await this.request(`/rest/v1/quiz_collaborators?quiz_id=eq.${quizId}&user_id=eq.${userId}&role=eq.editor&select=id`);
       if (!collaborators.length) throw new GameError('FORBIDDEN', 'Non puoi avviare questo quiz.');
     }
-    quiz.questions = await this.request(`/rest/v1/questions?quiz_id=eq.${quizId}&retired=eq.false&select=id,question_text,image_url,question_order,preview_seconds,answer_seconds,correct_points,wrong_points,answers(id,answer_text,answer_order,is_correct,retired)&order=question_order.asc,id.asc`);
+    quiz.questions = await this.request(`/rest/v1/questions?quiz_id=eq.${quizId}&retired=eq.false&select=id,question_text,image_url,audio_url,question_order,preview_seconds,answer_seconds,correct_points,wrong_points,answers(id,answer_text,answer_order,is_correct,retired)&order=question_order.asc,id.asc`);
     for (const q of quiz.questions) q.answers = q.answers.filter(a => !a.retired).sort((a, b) => a.answer_order - b.answer_order || a.id.localeCompare(b.id));
     return quiz;
   }

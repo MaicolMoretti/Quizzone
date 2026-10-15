@@ -181,6 +181,9 @@ grant execute on function public.archive_game(jsonb) to service_role;
 -- Applicare dopo schema.sql e game-engine.sql. La migrazione è riapplicabile.
 
 alter table public.questions add column if not exists retired boolean not null default false;
+alter table public.questions add column if not exists audio_url text;
+alter table public.questions add constraint questions_audio_url_check
+  check (audio_url is null or (length(audio_url) <= 2048 and audio_url ~* '^https?://[^[:space:]/?#]+[^[:space:]]*$'));
 alter table public.answers add column if not exists retired boolean not null default false;
 
 -- Le funzioni SECURITY DEFINER evitano ricorsione RLS tra quiz e collaboratori.
@@ -266,10 +269,10 @@ begin
       raise exception 'Identificativo domanda non valido.';
     end if;
     seen_q := array_append(seen_q, qid);
-    insert into public.questions(id, quiz_id, question_text, image_url, question_order, preview_seconds, answer_seconds, correct_points, wrong_points, retired, updated_at)
-    values(qid, p_quiz_id, trim(q->>'question_text'), nullif(q->>'image_url', ''), qi,
+    insert into public.questions(id, quiz_id, question_text, image_url, audio_url, question_order, preview_seconds, answer_seconds, correct_points, wrong_points, retired, updated_at)
+    values(qid, p_quiz_id, trim(q->>'question_text'), nullif(q->>'image_url', ''), nullif(trim(q->>'audio_url'), ''), qi,
       (q->>'preview_seconds')::integer, (q->>'answer_seconds')::integer, (q->>'correct_points')::integer, (q->>'wrong_points')::integer, false, v_now)
-    on conflict(id) do update set question_text = excluded.question_text, image_url = excluded.image_url,
+    on conflict(id) do update set question_text = excluded.question_text, image_url = excluded.image_url, audio_url = excluded.audio_url,
       question_order = excluded.question_order, preview_seconds = excluded.preview_seconds, answer_seconds = excluded.answer_seconds,
       correct_points = excluded.correct_points, wrong_points = excluded.wrong_points, retired = false, updated_at = v_now;
     if not exists(select 1 from jsonb_array_elements(q->'answers') x where x->'is_correct' = 'true'::jsonb) then

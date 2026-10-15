@@ -29,6 +29,7 @@ test('Supabase valida il JWT con Auth e distingue credenziali rifiutate da indis
 test('Il caricamento verifica il permesso editor prima di leggere le soluzioni', async t => {
   const repo = new SupabaseRepository('https://example.supabase.co', 'secret');
   const data = quiz();
+  data.questions[0].audio_url = 'https://example.test/traccia.mp3';
   let editor = false;
   const calls = [];
   t.mock.method(global, 'fetch', async url => {
@@ -43,6 +44,8 @@ test('Il caricamento verifica il permesso editor prima di leggere le soluzioni',
   editor = true;
   const loaded = await repo.loadQuiz('other', data.id);
   assert.equal(loaded.questions.length, 2);
+  assert.equal(loaded.questions[0].audio_url, data.questions[0].audio_url);
+  assert.ok(calls.some(url => url.includes('image_url,audio_url,')));
   assert.ok(calls.some(url => url.includes('role=eq.editor')));
 });
 

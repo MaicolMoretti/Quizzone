@@ -1,3 +1,7 @@
+/**
+ * Verifica accesso e navigazione quando il browser non può raggiungere Supabase
+ * direttamente e controlla che il proxy rifiuti percorsi non supportati.
+ */
 import { test, expect } from '@playwright/test';
 
 test('admin login and dashboard work when the browser cannot reach Supabase directly', async ({ page }) => {

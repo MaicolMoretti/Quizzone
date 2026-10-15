@@ -8,7 +8,7 @@
  */
 
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { DndContext, closestCenter, type DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -16,6 +16,9 @@ import { SortableContext, useSortable, arrayMove, sortableKeyboardCoordinates, v
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/client';
 import { newQuestion, validateQuestions, type Question, type Quiz } from '@/lib/quiz';
+import QuestionAudio from '@/components/question-audio';
+
+type OpenGame = { id: string; game_code: string; status: string };
 
 // Il pulsante di trascinamento è separato da selezione e rimozione; supporta anche la tastiera.
 function QuestionTab({ question, index, selected, select, remove }: { question: Question; index: number; selected: boolean; select: () => void; remove: () => void }) {
@@ -36,8 +39,23 @@ export default function QuizEditorPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
+  const loadedQuizRef = useRef<string | null>(null);
   const [error, setError] = useState('');
+  const [openGames, setOpenGames] = useState<OpenGame[]>([]);
+  const [checkingGames, setCheckingGames] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
+  async function checkOpenGames() {
+    setCheckingGames(true);
+    try {
+      const { data, error } = await supabase.from('games').select('id,game_code,status').eq('quiz_id', quizId).in('status', ['waiting', 'active']);
+      if (error) throw new Error(error.message);
+      setOpenGames(data || []);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Impossibile verificare le partite aperte.'); }
+    finally { setCheckingGames(false); }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -46,12 +64,19 @@ export default function QuizEditorPage() {
         const { data, error } = await supabase.from('quizzes').select('*,questions(*,answers(*))').eq('id', quizId).single();
         if (error) throw error;
         if (cancelled) return;
+        // Un aggiornamento dell'effetto (anche Fast Refresh in sviluppo) non
+        // deve sostituire una bozza locale mentre si conclude la partita.
+        if (dirtyRef.current && loadedQuizRef.current === quizId) return;
         // Gli elementi ritirati restano nel DB per lo storico, ma non tornano nell’editor.
         const loaded: Question[] = data.questions.filter((q: Question & { retired: boolean }) => !q.retired)
           .sort((a: Question, b: Question) => (a.question_order || 0) - (b.question_order || 0))
           .map((q: Question) => ({ ...q, answers: q.answers.filter(a => !a.retired).sort((a, b) => (a.answer_order || 0) - (b.answer_order || 0)) }));
-        if (!loaded.length) { loaded.push(newQuestion()); setDirty(true); }
+        setDirty(!loaded.length);
+        if (!loaded.length) loaded.push(newQuestion());
+        loadedQuizRef.current = quizId;
         setQuiz(data); setQuestions(loaded); setActiveId(loaded[0].id);
+        const games = await supabase.from('games').select('id,game_code,status').eq('quiz_id', quizId).in('status', ['waiting', 'active']);
+        if (!cancelled && !games.error) setOpenGames(games.data || []);
       } catch (e) { if (!cancelled) setError(e instanceof Error ? e.message : 'Impossibile caricare il quiz.'); }
       finally { if (!cancelled) setLoading(false); }
     }
@@ -76,14 +101,17 @@ export default function QuizEditorPage() {
   }
   // Un’unica RPC salva quiz, domande e risposte oppure annulla tutto in caso di errore.
   async function save() {
-    if (!quiz || saving) return;
+    if (!quiz || saving || openGames.length || checkingGames) return;
     const validation = validateQuestions(questions);
     if (validation || !quiz.title.trim()) { setError(validation || 'Inserisci un titolo.'); return; }
     setSaving(true); setError('');
     try {
       const { data, error } = await supabase.rpc('save_quiz', { p_quiz_id: quizId, p_expected_updated_at: quiz.updated_at,
         p_title: quiz.title, p_description: quiz.description, p_questions: questions });
-      if (error) throw new Error(error.message);
+      if (error) {
+        if (error.message.includes('Concludi le partite')) await checkOpenGames();
+        throw new Error(error.message);
+      }
       // La versione restituita diventa la precondizione del prossimo salvataggio.
       setQuiz({ ...quiz, updated_at: data }); setDirty(false);
     } catch (e) { setError(e instanceof Error ? e.message : 'Salvataggio non riuscito.'); }
@@ -96,9 +124,15 @@ export default function QuizEditorPage() {
     <header className="flex flex-wrap items-center justify-between gap-4 border-b bg-white p-5">
       <Link href="/dashboard" onClick={e => { if (dirty && !window.confirm('Uscire senza salvare le modifiche?')) e.preventDefault(); }}>← Dashboard</Link>
       <p role="status">{saving ? 'Salvataggio…' : dirty ? 'Modifiche non salvate' : 'Nessuna modifica da salvare'}</p>
-      <button className="action" onClick={save} disabled={saving}>Salva quiz</button>
+      <button className="action" onClick={save} disabled={saving || checkingGames || openGames.length > 0}>Salva quiz</button>
     </header>
     {error && <p role="alert" className="m-5 rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}
+    {openGames.length > 0 && <section aria-label="Partite che bloccano il salvataggio" className="m-5 space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-5 text-amber-950">
+      <p className="font-bold">Per salvare le domande, concludi prima le partite aperte di questo quiz.</p>
+      <p>Puoi continuare a scrivere. Apri la partita in una nuova scheda e premi «Termina partita», poi torna qui e verifica la chiusura senza ricaricare l’editor.</p>
+      <ul className="space-y-2">{openGames.map(game => <li key={game.id}><Link className="font-semibold underline" target="_blank" href={`/game/${game.id}/admin`}>Apri partita {game.game_code} · {game.status === 'waiting' ? 'in attesa' : 'in corso'} ↗</Link></li>)}</ul>
+      <button className="rounded-xl border border-amber-700 px-4 py-3 font-semibold disabled:opacity-50" disabled={checkingGames} onClick={() => void checkOpenGames()}>{checkingGames ? 'Verifica in corso…' : 'Ho concluso le partite: verifica'}</button>
+    </section>}
     <fieldset disabled={saving} className="mx-auto max-w-7xl p-5 disabled:opacity-60">
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <label>Titolo<input className="field" maxLength={200} value={quiz.title} onChange={e => { setQuiz({ ...quiz, title: e.target.value }); setDirty(true); }} /></label>
@@ -120,6 +154,9 @@ export default function QuizEditorPage() {
         {active ? <section className="space-y-6 rounded-3xl border border-gray-200 bg-white p-6">
           <label className="block font-bold">Testo della domanda<textarea className="field text-xl" maxLength={2000} value={active.question_text} onChange={e => update(active.id, { question_text: e.target.value })} /></label>
           <label className="block">URL immagine (opzionale)<input type="url" className="field" value={active.image_url || ''} placeholder="https://…" onChange={e => update(active.id, { image_url: e.target.value || null })} /></label>
+          <label className="block">URL traccia audio (opzionale)<input type="url" className="field" maxLength={2048} value={active.audio_url || ''} placeholder="https://…/traccia.mp3" onChange={e => update(active.id, { audio_url: e.target.value.trim() || null })} /></label>
+          <p className="text-sm text-gray-500">Inserisci il link diretto a un file audio, ad esempio MP3 o WAV, accessibile ai partecipanti. I link a pagine Spotify o YouTube non sono file audio. Avvia l’anteprima per verificare la traccia prima di salvare.</p>
+          {active.audio_url && <QuestionAudio key={`${active.id}:${active.audio_url}`} src={active.audio_url} />}
           <p className="text-sm text-gray-500">Compila le opzioni e seleziona almeno una risposta corretta.</p>
           <div className="grid gap-4 sm:grid-cols-2">{active.answers.map((a, i) => <div className="rounded-xl border border-gray-200 p-4" key={a.id}>
             <label>Risposta {String.fromCharCode(65 + i)}<input className="field" maxLength={500} value={a.answer_text} onChange={e => update(active.id, { answers: active.answers.map(item => item.id === a.id ? { ...item, answer_text: e.target.value } : item) })} /></label>

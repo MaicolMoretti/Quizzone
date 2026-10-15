@@ -1,5 +1,5 @@
--- Applicare DOPO schema.sql tramite SQL Editor Supabase o utenza amministrativa.
--- Solo il server Node scrive lo storico tramite la chiave service_role riservata.
+-- Applicare dopo schema.sql tramite SQL Editor Supabase o un utente amministrativo.
+-- Solo il server Node scrive lo storico usando la chiave service_role riservata.
 begin;
 
 alter table public.games enable row level security;

@@ -55,8 +55,20 @@ test('Migrazioni PostgreSQL: salvataggio atomico, RLS, conflitti, partite aperte
       return saved.rows[0].version;
     };
     const first = question(), second = question();
+    first.audio_url = 'https://example.test/traccia.mp3';
     await login();
     version = await save([first, second]);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [first.id])).rows[0].audio_url, first.audio_url);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [second.id])).rows[0].audio_url, null);
+    const invalidAudio = structuredClone(first); invalidAudio.audio_url = 'javascript:alert(1)';
+    await assert.rejects(save([invalidAudio, second]), /questions_audio_url_check/);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [first.id])).rows[0].audio_url, first.audio_url);
+    first.audio_url = 'https://example.test/nuova-traccia.wav';
+    version = await save([first, second]);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [first.id])).rows[0].audio_url, first.audio_url);
+    first.audio_url = null;
+    version = await save([first, second]);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [first.id])).rows[0].audio_url, null);
     assert.equal((await db.query('select count(*)::int as n from questions where not retired')).rows[0].n, 2);
     // Un errore a metà salvataggio deve ripristinare anche gli elementi marcati retired.
     const invalid = structuredClone(first); invalid.answers[0].is_correct = false;
@@ -101,5 +113,28 @@ test('Migrazioni PostgreSQL: salvataggio atomico, RLS, conflitti, partite aperte
     await login(outsider);
     assert.equal((await db.query('select * from player_answers')).rows.length, 0);
     assert.equal((await db.query('select * from game_players')).rows.length, 0);
+  } finally { await db.close(); }
+});
+
+test('Setup completo: campo audio e RPC disponibili anche su nuova installazione', async () => {
+  const db = new PGlite({ extensions: { uuid_ossp } });
+  try {
+    await db.exec(`create schema auth;
+      create role anon; create role authenticated; create role service_role bypassrls;
+      create table auth.users(id uuid primary key);
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+      grant usage on schema auth, public to anon, authenticated, service_role;
+      grant execute on function auth.uid() to anon, authenticated, service_role;
+    `);
+    await db.exec(await readFile(new URL('../database/setup.sql', import.meta.url), 'utf8'));
+    // Supabase concede SELECT ai ruoli API; PGlite non applica questi grant predefiniti.
+    await db.exec('grant select on all tables in schema public to authenticated');
+    await db.query('insert into auth.users(id) values($1)', [owner]);
+    const initial = await db.query('insert into quizzes(id,title,owner_id) values($1,$2,$3) returning updated_at::text', [quizId, 'Audio', owner]);
+    await db.exec('set role authenticated');
+    await db.query("select set_config('request.jwt.claim.sub', $1, false)", [owner]);
+    const q = { ...question(), audio_url: 'https://example.test/setup.mp3' };
+    await db.query('select save_quiz($1,$2::timestamptz,$3,$4,$5::jsonb)', [quizId, initial.rows[0].updated_at, 'Audio', '', JSON.stringify([q])]);
+    assert.equal((await db.query('select audio_url from questions where id=$1', [q.id])).rows[0].audio_url, q.audio_url);
   } finally { await db.close(); }
 });

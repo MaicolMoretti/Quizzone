@@ -1,3 +1,7 @@
+/**
+ * Verifica le decisioni esplicite del conduttore sulla classifica e sui passaggi
+ * di fase, assicurando che punteggi e risposte non vengano conteggiati due volte.
+ */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { GameEngine, snapshot } = require('../lib/engine');
@@ -9,7 +13,7 @@ test('Scelta host: classifica esplicita, salto diretto e finale cumulativo senza
   const p = await f.engine.join(f.code, 'Anna', 's');
   await f.command('start');
   for (let i = 0; i < 3; i++) {
-    await f.command(); // termina preview
+    await f.command(); // Termina la fase di anteprima.
     const q = f.engine.get(f.code).questions[i];
     f.advance(2500);
     await f.engine.answer(f.code, p.playerId, 's', q.id, q.answers[0].id);
@@ -19,7 +23,7 @@ test('Scelta host: classifica esplicita, salto diretto e finale cumulativo senza
     await f.engine.tick();
     assert.equal(f.engine.get(f.code).status, 'QUESTION_LOCKED');
     if (i === 1) {
-      await f.command(); // soluzione facoltativa, nessuna classifica
+      await f.command(); // La soluzione può essere mostrata senza pubblicare la classifica.
       assert.equal(snapshot(f.engine.get(f.code)).leaderboard, undefined);
       await f.command('show_leaderboard');
       assert.equal(snapshot(f.engine.get(f.code)).leaderboard[0].score, 100);

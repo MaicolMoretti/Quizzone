@@ -10,7 +10,7 @@ export interface GameState {
   gameId: string; gameCode: string; title: string; status: Phase; revision: number;
   currentQuestionIndex: number; totalQuestions: number; serverTime: number; deadline: number | null; timer: number;
   players: { id: string; nickname: string; connected: boolean }[]; playersCount: number; totalAnswers: number;
-  question?: { id: string; question_text: string; image_url: string | null; answers?: { id: string; answer_text: string; is_correct?: boolean }[] };
+  question?: { id: string; question_text: string; image_url: string | null; audio_url?: string | null; answers?: { id: string; answer_text: string; is_correct?: boolean }[] };
   statistics?: { answerId: string; count: number; percentage: number }[];
   leaderboard?: { id: string; nickname: string; score: number; rank: number }[];
   endReason?: 'finished' | 'expired';

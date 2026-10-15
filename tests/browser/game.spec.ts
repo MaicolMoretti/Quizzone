@@ -30,7 +30,7 @@ test('Creazione, salvataggio, ricarica, avvio e partita fino all’archivio nell
   await expect(page.getByLabel('Corretta', { exact: true }).first()).toBeChecked();
   await page.screenshot({ path: testInfo.outputPath('editor.png'), fullPage: true });
   await page.getByRole('link', { name: /Dashboard/ }).click();
-  await page.getByRole('button', { name: 'Avvia', exact: true }).click();
+  await page.locator('article').filter({ hasText: 'Quiz browser' }).getByRole('button', { name: 'Avvia', exact: true }).click();
   await expect(page).toHaveURL(/\/game\/.*\/admin$/);
   await expect(page.getByRole('heading', { name: 'Aspettiamo i giocatori' })).toBeVisible();
   const link = await page.locator('a[href*="/play/"]').getAttribute('href');
@@ -63,10 +63,11 @@ test('Creazione, salvataggio, ricarica, avvio e partita fino all’archivio nell
     await page.getByRole('button', { name: 'Concludi e archivia' }).click();
     await expect(player.getByRole('heading', { name: 'Partita conclusa' })).toBeVisible();
     const archive = await (await request.get('http://127.0.0.1:54325/test/archive')).json();
-    expect(archive).toHaveLength(1);
-    expect(archive[0].players[0].score).toBe(score);
-    expect(archive[0].submissions[0].points_awarded).toBe(score);
-    expect(archive[0].submissions).toHaveLength(1);
+    const archivedGame = archive.find((g: { id: string }) => g.id === new URL(page.url()).pathname.split('/')[2]);
+    expect(archivedGame).toBeDefined();
+    expect(archivedGame.players[0].score).toBe(score);
+    expect(archivedGame.submissions[0].points_awarded).toBe(score);
+    expect(archivedGame.submissions).toHaveLength(1);
   } finally { await playerContext.close(); await screen.close(); }
 });
 

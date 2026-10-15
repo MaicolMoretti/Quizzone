@@ -5,7 +5,7 @@
  */
 export interface Answer { id: string; answer_text: string; is_correct: boolean; answer_order?: number; retired?: boolean }
 export interface Question {
-  id: string; question_text: string; image_url: string | null; question_order?: number;
+  id: string; question_text: string; image_url: string | null; audio_url?: string | null; question_order?: number;
   preview_seconds: number; answer_seconds: number; correct_points: number; wrong_points: number;
   answers: Answer[];
 }
@@ -15,7 +15,7 @@ export interface Quiz { id: string; title: string; description: string | null; u
  * di 15 secondi e 100 punti. Va completata prima del salvataggio.
  */
 export function newQuestion(): Question {
-  return { id: crypto.randomUUID(), question_text: '', image_url: null, preview_seconds: 5, answer_seconds: 15,
+  return { id: crypto.randomUUID(), question_text: '', image_url: null, audio_url: null, preview_seconds: 5, answer_seconds: 15,
     correct_points: 100, wrong_points: 0,
     answers: Array.from({ length: 4 }, () => ({ id: crypto.randomUUID(), answer_text: '', is_correct: false })) };
 }
@@ -34,6 +34,12 @@ export function validateQuestions(questions: Question[]): string | null {
       if (!Number.isInteger(n) || n < min || n > max) return prefix + 'controlla tempi e punteggi.';
     }
     if (q.image_url && !/^https?:\/\//i.test(q.image_url)) return prefix + 'usa un URL immagine http o https.';
+    if (q.audio_url) {
+      try {
+        const url = new URL(q.audio_url);
+        if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || q.audio_url.length > 2048) throw new Error();
+      } catch { return prefix + 'usa un URL audio http o https valido (massimo 2048 caratteri).'; }
+    }
   }
   return null;
 }

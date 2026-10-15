@@ -37,10 +37,11 @@ app.post('/rest/v1/quizzes', (req, res) => {
   const quiz = { ...req.body, id: req.body.id || randomUUID(), updated_at: new Date().toISOString(), questions: [] };
   quizzes.set(quiz.id, quiz); res.status(201).json(quiz);
 });
-app.get('/rest/v1/games', (_req, res) => res.json([...games.values()].filter(g => ['waiting', 'active'].includes(g.status))));
+app.get('/rest/v1/games', (req, res) => res.json([...games.values()].filter(g => ['waiting', 'active'].includes(g.status) && (!req.query.quiz_id || g.quiz_id === req.query.quiz_id.replace('eq.', '')))));
 app.post('/rest/v1/rpc/save_quiz', (req, res) => {
   const p = req.body, quiz = quizzes.get(p.p_quiz_id);
   if (!quiz) return res.status(404).json({ message: 'Quiz non trovato' });
+  if ([...games.values()].some(g => g.quiz_id === quiz.id && ['waiting', 'active'].includes(g.status))) return res.status(400).json({ message: 'Concludi le partite aperte prima di modificare il quiz.' });
   if (p.p_expected_updated_at !== quiz.updated_at) return res.status(409).json({ message: 'Modifica concorrente' });
   quiz.title = p.p_title; quiz.description = p.p_description; quiz.questions = p.p_questions;
   quiz.updated_at = new Date().toISOString(); res.json(quiz.updated_at);
